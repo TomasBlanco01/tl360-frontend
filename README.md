@@ -13,7 +13,7 @@ Plataforma que conecta vecinos con comercios locales: búsqueda por rubro, ficha
 Requisitos: **Node.js 20+** y **npm 10+**.
 
 ```bash
-git clone https://github.com/<TU_USUARIO>/tl360-frontend.git
+git clone https://github.com/TomasBlanco01/tl360-frontend.git
 cd tl360-frontend
 npm install
 npm run dev
@@ -125,6 +125,6 @@ Los tests no dependen del `.env` local: `src/tests/setup.ts` mockea `PUBLIC_API_
 
 Proyecto Final — Desarrollo de Software — UTN FRTL — Trenque Lauquen (2026).
 
-Frontend por **Tomas Blanco** — [tl360-frontend](https://github.com/<TU_USUARIO>/tl360-frontend).
+Frontend por **Tomas Blanco** — [tl360-frontend](https://github.com/TomasBlanco01/tl360-frontend).
 
 > Backend en Rust/Axum (`tl360-backend`) se entrega en etapa posterior y no forma parte de este repositorio.
