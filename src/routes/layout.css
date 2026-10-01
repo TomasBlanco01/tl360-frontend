@@ -1,0 +1,51 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+	--color-brand-50: #f8f5ff;
+	--color-brand-100: #f3e7ff;
+	--color-brand-200: #e4d0ff;
+	--color-brand-300: #c1a3ff;
+	--color-brand-400: #a074f0;
+	--color-brand-500: #7e57c2;
+	--color-brand-600: #5e35b1;
+	--color-brand-700: #4a148c;
+	--color-brand-900: #3b0a45;
+
+	--color-accent-500: #009688;
+	--color-accent-600: #00786f;
+
+	--color-success-50: #e8f5e9;
+	--color-success-600: #2e7d32;
+	--color-danger-50: #ffebee;
+	--color-danger-600: #c62828;
+	--color-warning-500: #f9a825;
+
+	--radius-card: 1rem;
+	--radius-pill: 999px;
+
+	--shadow-card: 0 2px 10px rgb(0 0 0 / 0.06);
+	--shadow-card-hover: 0 10px 30px rgb(90 40 160 / 0.12);
+}
+
+/* El modo (claro/oscuro) se aplica vía [data-theme] en <html>, seteado por theme.svelte.ts.
+   El acento (--color-brand-* y --color-accent-*) se sobreescribe en runtime desde el mismo store,
+   independiente del modo. */
+:root[data-theme='dark'] {
+	--shadow-card: 0 2px 16px rgb(0 0 0 / 0.5);
+	--shadow-card-hover: 0 14px 36px rgb(0 0 0 / 0.6);
+}
+
+body {
+	font-family: var(--font-sans);
+}
+h1,
+h2,
+h3 {
+	font-family: var(--font-display);
+	letter-spacing: -0.02em;
+}
