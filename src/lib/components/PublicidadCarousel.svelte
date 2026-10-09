@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { animate } from 'animejs';
 	import type { Publicidad } from '$lib/types';
+	import { urlEmpresa } from '$lib/slug';
+	import { browser } from '$app/environment';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
@@ -10,6 +12,26 @@
 	let autoplayTimer: ReturnType<typeof setInterval> | undefined;
 	let cardEls: (HTMLDivElement | null)[] = [];
 	let montado = false;
+	const reduceMovimiento = browser && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+	// 2.5 Swipe táctil: si el desplazamiento horizontal supera 50px, cambia de tarjeta.
+	let tactoX: number | null = null;
+
+	function alTactoInicio(e: TouchEvent) {
+		tactoX = e.touches[0]?.clientX ?? null;
+	}
+	function alTactoFin(e: TouchEvent) {
+		if (tactoX === null) return;
+		const dx = (e.changedTouches[0]?.clientX ?? tactoX) - tactoX;
+		tactoX = null;
+		if (Math.abs(dx) < 50) return;
+		if (dx < 0) {
+			siguiente();
+		} else {
+			anterior();
+		}
+		reiniciarAutoplay();
+	}
 
 	// Tilt 3D de la tarjeta activa, siguiendo el mouse (solo esa tarjeta, no es anime.js: es
 	// liviano y no compite con la animación de posición de abajo, que sí usa anime.js).
@@ -38,6 +60,7 @@
 
 	function reiniciarAutoplay() {
 		if (autoplayTimer) clearInterval(autoplayTimer);
+		if (reduceMovimiento) return;
 		if (items.length > 1) autoplayTimer = setInterval(siguiente, 4500);
 	}
 
@@ -141,10 +164,12 @@
 
 {#if items.length > 0}
 	<div
-		class="relative h-72 sm:h-80"
+		class="relative h-72 touch-pan-y sm:h-80"
 		style="perspective: 1400px;"
 		onmouseenter={() => clearInterval(autoplayTimer)}
 		onmouseleave={reiniciarAutoplay}
+		ontouchstart={alTactoInicio}
+		ontouchend={alTactoFin}
 		role="group"
 		aria-roledescription="carrusel"
 		aria-label="Publicidades destacadas"
@@ -175,7 +200,13 @@
 						onpointerleave={esActiva ? onTiltLeave : undefined}
 					>
 						{#if pub.imagen_url}
-							<img src={pub.imagen_url} alt={pub.titulo} class="h-36 w-full object-cover sm:h-40" />
+							<img
+								src={pub.imagen_url}
+								alt={pub.titulo}
+								class="h-36 w-full object-cover sm:h-40"
+								loading="lazy"
+								decoding="async"
+							/>
 						{:else}
 							<div
 								class="h-36 w-full sm:h-40"
@@ -189,7 +220,10 @@
 							</p>
 							{#if esActiva}
 								<a
-									href="/comercios/{pub.empresa_id}"
+									href={urlEmpresa({
+										id: pub.empresa_id,
+										slug: pub.empresa_slug
+									})}
 									class="mt-2 inline-block text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400"
 								>
 									Ver comercio →
