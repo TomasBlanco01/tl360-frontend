@@ -1,16 +1,25 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { api } from '$lib/api';
 	import { distanciaKm, formatearDistancia } from '$lib/geo';
+	import { urlEmpresa } from '$lib/slug';
 	import type { Categoria, PuntoMapa } from '$lib/types';
 	import MapaComercios from '$lib/components/MapaComercios.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 
+	// 2.1 El directorio unificado vive en /comercios?vista=mapa. Esta ruta vieja redirige
+	// conservando el filtro de rubro, para no romper enlaces guardados ni el test de /mapa.
+	const redirigir = page.url.searchParams.toString();
+	$effect(() => {
+		goto(`/comercios?vista=mapa${redirigir ? `&${redirigir}` : ''}`, { replaceState: true });
+	});
+
 	let categorias = $state<Categoria[]>([]);
 	let puntos = $state<PuntoMapa[]>([]);
-	let categoriaId = $state('');
+	let categoriaId = $state(page.url.searchParams.get('categoria_id') ?? '');
 	let cargando = $state(true);
 	let error = $state('');
 
@@ -39,7 +48,7 @@
 			.finally(() => (cargando = false));
 	});
 
-	// Con la ubicación del usuario, se listan los más cercanos (RF-07).
+	// Con la ubicación del usuario, se listan los más cercanos (RF-02).
 	const cercanos = $derived(
 		yo
 			? puntos
@@ -73,7 +82,11 @@
 <div class="mx-auto max-w-5xl px-4 py-8">
 	<h1 class="mb-1 text-2xl font-bold text-gray-800 dark:text-gray-100">Mapa de comercios</h1>
 	<p class="mb-5 text-gray-500 dark:text-gray-400">
-		Encontrá comercios por zona. Tocá un punto para ver su ficha.
+		Encontrá comercios por zona. Tocá un punto para ver su ficha. Estamos mudando esta vista a
+		<a
+			href="/comercios?vista=mapa"
+			class="font-medium text-brand-600 hover:underline dark:text-brand-400">Comercios → Mapa</a
+		>.
 	</p>
 
 	<div class="mb-4 flex flex-wrap items-center gap-3">
@@ -109,7 +122,14 @@
 				{puntos}
 				{yo}
 				alto="h-[28rem]"
-				onseleccionar={(id) => goto(`/comercios/${id}`)}
+				onseleccionar={(id) => {
+					const p = puntos.find((x) => x.id === id);
+					goto(
+						p && 'slug' in p && p.slug
+							? `/comercios/${(p as unknown as { slug: string }).slug}`
+							: `/comercios/${id}`
+					);
+				}}
 			/>
 		</Card>
 		{#if !cargando && puntos.length === 0}
@@ -119,14 +139,18 @@
 		{/if}
 	{/if}
 
-	{#if cercanos.length > 0}
+	{#if buscandoUbicacion}
+		<p class="mt-4 text-sm text-gray-400 dark:text-gray-500" role="status">
+			Calculando distancias…
+		</p>
+	{:else if cercanos.length > 0}
 		<h2 class="mt-6 mb-2 text-lg font-semibold text-gray-800 dark:text-gray-100">
 			Los más cercanos
 		</h2>
 		<ul class="flex flex-col gap-2">
 			{#each cercanos as c (c.id)}
 				<li>
-					<a href="/comercios/{c.id}">
+					<a href={urlEmpresa(c as unknown as { id: number; slug?: string })}>
 						<Card hoverable class="flex items-center justify-between gap-3 p-3">
 							<span class="font-medium text-gray-800 dark:text-gray-100">{c.nombre}</span>
 							<span class="text-sm text-gray-500 dark:text-gray-400"

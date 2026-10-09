@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distanciaKm, formatearDistancia } from './geo';
+import { agruparPuntos, distanciaKm, escaparHtml, formatearDistancia } from './geo';
 
 describe('distanciaKm', () => {
 	it('es 0 entre el mismo punto', () => {
@@ -32,5 +32,37 @@ describe('formatearDistancia', () => {
 	it('en kilómetros con coma decimal desde 1 km', () => {
 		expect(formatearDistancia(1.24)).toBe('1,2 km');
 		expect(formatearDistancia(12)).toBe('12,0 km');
+	});
+});
+
+describe('agruparPuntos', () => {
+	it('agrupa puntos cercanos y deja solos a los lejanos', () => {
+		const grupos = agruparPuntos(
+			[
+				{ lat: -35.9711, lng: -62.7333 },
+				{ lat: -35.9712, lng: -62.7334 },
+				{ lat: -35.9, lng: -62.6 }
+			],
+			14
+		);
+		expect(grupos).toHaveLength(2);
+		expect(grupos.map((g) => g.items.length).sort()).toEqual([1, 2]);
+	});
+
+	it('a más zoom, menos agrupación', () => {
+		const pts = [
+			{ lat: -35.9711, lng: -62.7333 },
+			{ lat: -35.9725, lng: -62.7345 }
+		];
+		expect(agruparPuntos(pts, 12)).toHaveLength(1);
+		expect(agruparPuntos(pts, 16)).toHaveLength(2);
+	});
+});
+
+describe('escaparHtml', () => {
+	it('escapa caracteres para popup seguro', () => {
+		expect(escaparHtml('<b>"x"&\'y\'</b>')).toBe(
+			'&lt;b&gt;&quot;x&quot;&amp;&#39;y&#39;&lt;/b&gt;'
+		);
 	});
 });
