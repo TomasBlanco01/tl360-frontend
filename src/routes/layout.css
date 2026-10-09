@@ -49,3 +49,54 @@ h3 {
 	font-family: var(--font-display);
 	letter-spacing: -0.02em;
 }
+
+/* 2.6 Ergonomía: todo lo clickeable muestra pointer, incluso sin href o deshabilitado visual. */
+button:not(:disabled),
+[role='button'],
+a,
+select,
+summary {
+	cursor: pointer;
+}
+
+/* 2.3 Escala de capas: contenido z-0/10, navbar z-40, modales/lightbox z-50, toaster z-60.
+   El mapa Leaflet (panes z 400/1000) se aísla con `isolate z-0` en su contenedor. */
+.navbar-fijo {
+	z-index: 40;
+}
+
+/* 2.6 Modo oscuro en calendarios/horas nativos. */
+input[type='date'],
+input[type='time'] {
+	color-scheme: light;
+}
+:root[data-theme='dark'] input[type='date'],
+:root[data-theme='dark'] input[type='time'],
+.scheme-dark {
+	color-scheme: dark;
+}
+
+/* Foco visible consistente para teclado (a11y). */
+:focus-visible {
+	outline: 2px solid var(--color-brand-400);
+	outline-offset: 2px;
+}
+
+/* Respeta lectores con movimiento reducido: apaga transiciones globales. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* Target táctil mínimo 44px en controles del directorio/mapa. */
+button,
+a,
+select,
+input[type='checkbox'],
+input[type='radio'] {
+	min-height: 24px;
+}

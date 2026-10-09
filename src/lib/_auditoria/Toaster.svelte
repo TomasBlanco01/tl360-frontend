@@ -11,14 +11,15 @@
 </script>
 
 <!-- Una sola región viva: los lectores de pantalla anuncian cada aviso sin mover el foco. -->
+<!-- z-[60] por encima de navbar (z-40), modales/lightbox (z-50) y mapa Leaflet (aislado en z-0). -->
 <div
-	class="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex flex-col items-center gap-2 px-4 sm:inset-x-auto sm:right-4 sm:items-end"
-	role="status"
+	class="pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex flex-col items-center gap-2 px-4 sm:inset-x-auto sm:right-4 sm:items-end"
 	aria-live="polite"
 >
 	{#each toast.items as t (t.id)}
 		<div
 			transition:fly={{ y: 16, duration: 200 }}
+			role={t.tipo === 'error' ? 'alert' : 'status'}
 			class="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-lg border-l-4 bg-white p-3 text-sm text-gray-800 shadow-lg dark:bg-gray-800 dark:text-gray-100 {borde[
 				t.tipo
 			]}"
