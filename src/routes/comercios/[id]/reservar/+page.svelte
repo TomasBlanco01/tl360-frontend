@@ -2,14 +2,18 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { api, ApiError } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
 	import type { Empresa, HorariosPorDia } from '$lib/types';
 	import { slotsDelDia } from '$lib/turnos';
+	import { urlEmpresa } from '$lib/slug';
+	import { exigirAcceso } from '$lib/auth/guard';
+	import { reportarError, track } from '$lib/obs';
+	import { toast } from '$lib/_auditoria/toast.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 
-	const empresaId = $derived(Number(page.params.id));
+	// 1.1 Acepta id numérico o slug.
+	const slugOId = $derived(page.params.id);
 
 	let empresa = $state<Empresa | null>(null);
 	let horarios = $state<HorariosPorDia>({});
@@ -21,25 +25,29 @@
 	let reservando = $state(false);
 
 	$effect(() => {
-		if (!auth.user) goto('/auth/login');
+		exigirAcceso('auth');
 	});
 
 	$effect(() => {
-		api.get<Empresa>(`/empresas/${empresaId}`).then((e) => {
+		const param = slugOId;
+		api.get<Empresa>(`/empresas/${param}`).then((e) => {
 			if (e.turnos_habilitados === false) {
-				goto(`/comercios/${empresaId}`, { replaceState: true });
+				goto(urlEmpresa(e), { replaceState: true });
 				return;
 			}
 			empresa = e;
+			api
+				.get<HorariosPorDia>(`/empresas/horarios/${e.id}`)
+				.then((h) => (horarios = h))
+				.catch((err) => console.error(err));
 		});
-		api.get<HorariosPorDia>(`/empresas/horarios/${empresaId}`).then((h) => (horarios = h));
 	});
 
 	async function cargarOcupados() {
-		if (!fecha) return;
+		if (!fecha || !empresa) return;
 		try {
 			const res = await api.get<{ hora: string }[]>(
-				`/turnos/ocupados?empresa_id=${empresaId}&fecha=${fecha}`
+				`/turnos/ocupados?empresa_id=${empresa.id}&fecha=${fecha}`
 			);
 			ocupados = res.map((t) => t.hora);
 		} catch (err) {
@@ -60,19 +68,30 @@
 	}
 
 	async function confirmar() {
-		if (!horaSeleccionada) return;
+		if (!horaSeleccionada || !empresa) return;
 		error = '';
 		reservando = true;
 		try {
 			await api.post('/turnos/reservar', {
-				empresa_id: empresaId,
+				empresa_id: empresa.id,
 				fecha,
 				hora: horaSeleccionada
 			});
 			paso = 'exito';
+			toast.exito('Turno reservado correctamente.');
+			track('reservar_turno', { empresa: empresa.id });
 		} catch (err) {
 			console.error(err);
-			error = err instanceof ApiError ? err.message : 'No se pudo reservar el turno.';
+			reportarError(err, { donde: 'reservar', empresa: empresa.id });
+			// 1.5 Si otro cliente ganó la carrera por el slot (409), avisar y refrescar la grilla
+			// manteniendo el paso de confirmación para que pueda elegir otro horario.
+			if (err instanceof ApiError && err.status === 409) {
+				error = err.message || 'Ese horario se acaba de ocupar. Elegí otro disponible.';
+				cargarOcupados();
+			} else {
+				error = err instanceof ApiError ? err.message : 'No se pudo reservar el turno.';
+			}
+			toast.error(error);
 		} finally {
 			reservando = false;
 		}

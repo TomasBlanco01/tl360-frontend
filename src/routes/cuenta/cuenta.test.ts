@@ -5,6 +5,7 @@ import { goto } from '$app/navigation';
 import { ApiError, api } from '$lib/api';
 import { auth } from '$lib/stores/auth.svelte';
 import { favoritos } from '$lib/stores/favoritos.svelte';
+import type { MiTurno } from '$lib/types';
 import { empresa } from '../../tests/helpers';
 import Cuenta from './+page.svelte';
 
@@ -37,7 +38,7 @@ const turnos = [
 	}
 ];
 
-function backend(mios = turnos) {
+function backend(mios: MiTurno[] = turnos) {
 	get.mockImplementation(async (url: string) => {
 		if (url === '/turnos/mis-turnos') return mios;
 		const m = url.match(/^\/empresas\/(\d+)$/);
@@ -88,11 +89,17 @@ describe('Mi cuenta', () => {
 	});
 
 	describe('cancelar un turno', () => {
-		it('si el usuario confirma, lo cancela y lo saca de la lista', async () => {
-			vi.spyOn(window, 'confirm').mockReturnValue(true);
+		// 2.2 La confirmación es un modal accesible (ConfirmModal), no window.confirm().
+		async function abrirModal() {
 			render(Cuenta);
 			await screen.findByText('Peluquería Central');
 			await userEvent.click(screen.getAllByRole('button', { name: 'Cancelar Turno' })[0]);
+			expect(await screen.findByText('Cancelar turno')).toBeInTheDocument();
+		}
+
+		it('si el usuario confirma, lo cancela y lo saca de la lista', async () => {
+			await abrirModal();
+			await userEvent.click(screen.getByRole('button', { name: 'Sí, cancelar' }));
 			expect(borrar).toHaveBeenCalledWith('/turnos/cancelar/10');
 			await vi.waitFor(() =>
 				expect(screen.queryByText('Peluquería Central')).not.toBeInTheDocument()
@@ -101,39 +108,33 @@ describe('Mi cuenta', () => {
 		});
 
 		it('si se arrepiente, no hace nada', async () => {
-			vi.spyOn(window, 'confirm').mockReturnValue(false);
-			render(Cuenta);
-			await screen.findByText('Peluquería Central');
-			await userEvent.click(screen.getAllByRole('button', { name: 'Cancelar Turno' })[0]);
+			await abrirModal();
+			await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
 			expect(borrar).not.toHaveBeenCalled();
 			expect(screen.getByText('Peluquería Central')).toBeInTheDocument();
 		});
 
 		it('si el backend lo rechaza (fuera de plazo), muestra el motivo y conserva el turno', async () => {
-			vi.spyOn(window, 'confirm').mockReturnValue(true);
-			const aviso = vi.spyOn(window, 'alert').mockImplementation(() => {});
 			borrar.mockRejectedValue(
 				new ApiError(400, 'Solo se puede cancelar un turno con al menos 2 horas de anticipación')
 			);
-			render(Cuenta);
-			await screen.findByText('Peluquería Central');
-			await userEvent.click(screen.getAllByRole('button', { name: 'Cancelar Turno' })[0]);
+			await abrirModal();
+			await userEvent.click(screen.getByRole('button', { name: 'Sí, cancelar' }));
 			await vi.waitFor(() =>
-				expect(aviso).toHaveBeenCalledWith(
-					'Solo se puede cancelar un turno con al menos 2 horas de anticipación'
-				)
+				expect(
+					screen.getByText('Solo se puede cancelar un turno con al menos 2 horas de anticipación')
+				).toBeInTheDocument()
 			);
 			expect(screen.getByText('Peluquería Central')).toBeInTheDocument();
 		});
 
 		it('ante un error inesperado muestra un mensaje genérico', async () => {
-			vi.spyOn(window, 'confirm').mockReturnValue(true);
-			const aviso = vi.spyOn(window, 'alert').mockImplementation(() => {});
 			borrar.mockRejectedValue(new TypeError('Failed to fetch'));
-			render(Cuenta);
-			await screen.findByText('Peluquería Central');
-			await userEvent.click(screen.getAllByRole('button', { name: 'Cancelar Turno' })[0]);
-			await vi.waitFor(() => expect(aviso).toHaveBeenCalledWith('No se pudo cancelar el turno.'));
+			await abrirModal();
+			await userEvent.click(screen.getByRole('button', { name: 'Sí, cancelar' }));
+			await vi.waitFor(() =>
+				expect(screen.getByText('No se pudo cancelar el turno.')).toBeInTheDocument()
+			);
 		});
 	});
 
@@ -153,6 +154,40 @@ describe('Mi cuenta', () => {
 			expect(get).toHaveBeenCalledWith('/empresas/7');
 			expect(get).toHaveBeenCalledWith('/empresas/9');
 			expect(get).not.toHaveBeenCalledWith('/empresas');
+		});
+	});
+
+	describe('historial (2.6)', () => {
+		it('separa próximos y pasados y el nombre enlaza a la ficha', async () => {
+			backend([
+				{
+					id: 10,
+					fecha: '2026-10-13',
+					hora: '10:00:00',
+					estado: 'confirmado',
+					empresa_nombre: 'Futura',
+					empresa_id: 5,
+					empresa_slug: 'futura'
+				},
+				{
+					id: 11,
+					fecha: '2020-01-01',
+					hora: '10:00:00',
+					estado: 'confirmado',
+					empresa_nombre: 'Vieja',
+					empresa_id: 6
+				}
+			]);
+			render(Cuenta);
+			await screen.findByText('Futura');
+			expect(screen.queryByText('Vieja')).not.toBeInTheDocument();
+			expect(screen.getByRole('link', { name: 'Futura' })).toHaveAttribute(
+				'href',
+				'/comercios/futura'
+			);
+			await userEvent.click(screen.getByRole('button', { name: /Turnos pasados/ }));
+			expect(await screen.findByText('Vieja')).toBeInTheDocument();
+			expect(screen.queryByText('Futura')).not.toBeInTheDocument();
 		});
 	});
 });
