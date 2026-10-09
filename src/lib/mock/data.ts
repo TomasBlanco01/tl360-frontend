@@ -1,4 +1,5 @@
 import type { Categoria, Empresa, HorariosPorDia, TelefonoEmpresa, Usuario } from '$lib/types';
+import { slugify } from '$lib/slug';
 
 /**
  * Datos de ejemplo para PUBLIC_MOCK_MODE=true (ver src/lib/mock/handler.ts).
@@ -931,6 +932,64 @@ export const empresasSeed: Empresa[] = [
 		fotos: []
 	}
 ];
+
+// ---------- Enriquecimiento post-seed (slugs, contacto, verificación, etiquetas) ----------
+// Se hace por código y no a mano para no reescribir las 54 fichas: el resultado es el mismo
+// que si cada seed trajera sus columnas PostgreSQL (`slug UNIQUE`, `modo_contacto`, etc.).
+{
+	const vistos = new Set<string>();
+	for (const e of empresasSeed) {
+		// 1.1 Slug SEO único.
+		const base = slugify(e.nombre) || `comercio-${e.id}`;
+		e.slug = vistos.has(base) ? `${base}-${e.id}` : base;
+		vistos.add(e.slug);
+		// 1.2 Canal de contacto por defecto (la ficha ya lo respeta).
+		e.modo_contacto ??= 'ambos';
+		// 1.4 Estado de verificación derivado del booleano viejo + casos de ejemplo.
+		if (e.verificado_estado === undefined) {
+			e.verificado_estado = e.verificado ? 'verificado' : 'sin_solicitar';
+		}
+	}
+	// Casos de ejemplo para el flujo de verificación del admin:
+	// 2 comercios pendientes y 1 rechazado, con CUIT válido (módulo 11).
+	const pendiente1 = empresasSeed.find((e) => e.id === 2);
+	if (pendiente1) {
+		pendiente1.verificado_estado = 'pendiente';
+		pendiente1.cuit = '20123456786';
+		pendiente1.constancia_cuit_url = 'https://example.com/constancia-barberia-dorrego.pdf';
+	}
+	const pendiente2 = empresasSeed.find((e) => e.id === 4);
+	if (pendiente2) {
+		pendiente2.verificado_estado = 'pendiente';
+		pendiente2.cuit = '27234567816';
+		pendiente2.constancia_cuit_url = 'https://example.com/constancia-gimnasio-sarmiento.pdf';
+	}
+	const rechazado = empresasSeed.find((e) => e.id === 6);
+	if (rechazado) {
+		rechazado.verificado_estado = 'rechazado';
+		rechazado.cuit = '20987654334';
+	}
+	const verificadoConCuit = empresasSeed.find((e) => e.id === 1);
+	if (verificadoConCuit) {
+		verificadoConCuit.cuit = '30567891255';
+		verificadoConCuit.constancia_cuit_url = 'https://example.com/constancia-estilo-urbano.pdf';
+	}
+	// 1.6 Distribuir el catálogo de accesibilidad para que los filtros tengan resultados.
+	const catalogo = [
+		'Rampa de acceso',
+		'Baño adaptado',
+		'Apto celíacos',
+		'Acepta mascotas',
+		'Wi-Fi gratis'
+	];
+	empresasSeed.forEach((e, i) => {
+		const extras = [catalogo[i % catalogo.length]];
+		if (i % 3 === 0) extras.push(catalogo[(i + 2) % catalogo.length]);
+		const actuales = e.etiquetas ?? [];
+		for (const tag of extras) if (!actuales.includes(tag)) actuales.push(tag);
+		e.etiquetas = actuales;
+	});
+}
 
 const semana = (rango1 = '09:00-13:00', rango2 = '16:00-20:00'): HorariosPorDia => ({
 	Lunes: [rango1, rango2],

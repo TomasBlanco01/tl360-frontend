@@ -137,7 +137,8 @@ describe('mock: turnos', () => {
 		const mios = (await llamar('GET', '/turnos/mis-turnos')).data;
 		expect(mios).toHaveLength(1);
 		expect(mios[0]).toMatchObject({ fecha: '2026-10-13', hora: '10:00', estado: 'confirmado' });
-		expect(mios[0].empresa_id).toBeUndefined();
+		// 1.5/2.6 El turno trae el comercio para enlazar a la ficha sin otro fetch.
+		expect(mios[0].empresa_id).toBe(1);
 	});
 
 	it('los horarios ocupados son por comercio y por día', async () => {
@@ -156,6 +157,25 @@ describe('mock: turnos', () => {
 		const id = (await llamar('POST', '/turnos/reservar', reserva)).data.id;
 		expect((await llamar('DELETE', `/turnos/cancelar/${id}`)).status).toBe(200);
 		expect((await llamar('GET', '/turnos/mis-turnos')).data).toEqual([]);
+	});
+
+	it('cancelar libera el slot para otros clientes (1.5)', async () => {
+		const { llamar } = await nuevo();
+		const id = (await llamar('POST', '/turnos/reservar', reserva)).data.id;
+		expect(
+			(await llamar('GET', '/turnos/ocupados?empresa_id=1&fecha=2026-10-13')).data
+		).toEqual([{ hora: '10:00' }]);
+		await llamar('DELETE', `/turnos/cancelar/${id}`);
+		expect((await llamar('GET', '/turnos/ocupados?empresa_id=1&fecha=2026-10-13')).data).toEqual(
+			[]
+		);
+	});
+
+	it('reservar dos veces el mismo slot da 409 (concurrencia)', async () => {
+		const { llamar } = await nuevo();
+		expect((await llamar('POST', '/turnos/reservar', reserva)).status).toBe(201);
+		const doble = await llamar('POST', '/turnos/reservar', reserva);
+		expect(doble.status).toBe(409);
 	});
 });
 
