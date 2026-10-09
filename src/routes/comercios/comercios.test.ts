@@ -27,7 +27,7 @@ function backend(porPedido: (url: string) => unknown) {
 	get.mockImplementation(async (url: string) => (url === '/categorias' ? rubros : porPedido(url)));
 }
 const pedidosDeEmpresas = () =>
-	get.mock.calls.map((c) => c[0] as string).filter((u) => u.startsWith('/empresas'));
+	get.mock.calls.map((c) => c[0] as string).filter((u) => u.startsWith('/empresas?'));
 
 beforeEach(() => {
 	get.mockReset();
