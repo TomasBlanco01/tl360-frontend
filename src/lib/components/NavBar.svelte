@@ -2,16 +2,20 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { favoritos } from '$lib/stores/favoritos.svelte';
+	import { toast } from '$lib/_auditoria/toast.svelte';
 	import ThemePicker from '$lib/components/ThemePicker.svelte';
+	import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 	import Menu from '@lucide/svelte/icons/menu';
-	import Swal from 'sweetalert2';
 
 	let drawerOpen = $state(false);
+	let confirmarSalida = $state(false);
+	let saliendo = $state(false);
 
 	const links = $derived([
 		{ label: 'Inicio', path: '/' },
 		{ label: 'Comercios', path: '/comercios' },
-		{ label: 'Mapa', path: '/mapa' },
+		// 2.1 Directorio unificado: el mapa vive en /comercios?vista=mapa.
+		{ label: 'Mapa', path: '/comercios?vista=mapa' },
 		...(auth.user && !auth.isAdmin && !auth.isSuperAdmin
 			? [{ label: 'Mi Cuenta', path: '/cuenta' }]
 			: []),
@@ -19,35 +23,27 @@
 		...(auth.isSuperAdmin ? [{ label: 'Admin', path: '/admin' }] : [])
 	] as { label: string; path: string }[]);
 
-	async function handleLogout() {
-		const result = await Swal.fire({
-			title: 'Cerrar sesión',
-			text: '¿Estás seguro de que deseas cerrar sesión?',
-			icon: 'warning',
-			showCancelButton: true,
-			confirmButtonText: 'Sí, cerrar sesión',
-			cancelButtonText: 'Cancelar',
-			reverseButtons: true
-		});
+	function pedirSalir() {
+		confirmarSalida = true;
+	}
 
-		if (result.isConfirmed) {
+	async function confirmarLogout() {
+		saliendo = true;
+		try {
 			auth.logout();
 			favoritos.sync();
 			drawerOpen = false;
-			await Swal.fire({
-				title: 'Sesión cerrada',
-				text: 'Has cerrado sesión correctamente.',
-				icon: 'success',
-				timer: 1200,
-				showConfirmButton: false
-			});
+			confirmarSalida = false;
+			toast.exito('Sesión cerrada correctamente.');
 			goto('/auth/login');
+		} finally {
+			saliendo = false;
 		}
 	}
 </script>
 
 <div
-	class="sticky top-0 z-30 bg-white/90 shadow-sm backdrop-blur dark:bg-gray-950/90 dark:shadow-black/30"
+	class="sticky top-0 z-40 bg-white/90 shadow-sm backdrop-blur dark:bg-gray-950/90 dark:shadow-black/30"
 >
 	<div class="mx-auto flex max-w-6xl items-center px-4 py-3">
 		<button
@@ -73,7 +69,7 @@
 			{#if auth.user}
 				<button
 					class="ml-2 rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-					onclick={handleLogout}
+					onclick={pedirSalir}
 				>
 					Salir ({auth.user.nombre})
 				</button>
@@ -128,7 +124,7 @@
 					<li>
 						<button
 							class="block w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
-							onclick={handleLogout}
+							onclick={pedirSalir}
 						>
 							Salir ({auth.user.nombre})
 						</button>
@@ -153,3 +149,13 @@
 		</div>
 	</div>
 {/if}
+
+<ConfirmModal
+	abierto={confirmarSalida}
+	titulo="Cerrar sesión"
+	descripcion="¿Estás seguro de que deseas cerrar sesión?"
+	confirmarTexto="Sí, cerrar sesión"
+	oncancelar={() => (confirmarSalida = false)}
+	onconfirmar={confirmarLogout}
+	ocupado={saliendo}
+/>
