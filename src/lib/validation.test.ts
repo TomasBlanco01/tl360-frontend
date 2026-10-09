@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
+	caracteristicaTelefono,
+	constanciaCuit,
+	cuit,
 	email,
+	esConstanciaValida,
+	esCuitValido,
+	esTurnoPasado,
+	formatearFechaAR,
 	minLength,
 	numericPositive,
 	phone,
 	required,
+	telefonoSoloDigitos,
 	validate,
-	validateForm
+	validateForm,
+	validarArchivoConstancia
 } from './validation';
 
 describe('required', () => {
@@ -38,6 +47,44 @@ describe('phone', () => {
 	});
 	it.each(['123', 'abc123456', '1'.repeat(21)])('rechaza %s', (v) => {
 		expect(phone()(v)).toBe('Ingresá un teléfono válido');
+	});
+});
+
+describe('telefonoSoloDigitos (RF-02, guardar ficha)', () => {
+	it.each(['2392411234', '2392000000', '000000'])('acepta %s', (v) => {
+		expect(telefonoSoloDigitos()(v)).toBeNull();
+	});
+	it.each(['2392-411234', '2392 411234', '(2392)411234', '+5492392', 'abc123456', '123'])(
+		'rechaza %s',
+		(v) => {
+			expect(telefonoSoloDigitos()(v)).toBe('Usá solo números, sin espacios ni guiones');
+		}
+	);
+	it('vacío no es error (lo decide required)', () => {
+		expect(telefonoSoloDigitos()('')).toBeNull();
+	});
+});
+
+describe('caracteristicaTelefono (2 a 5 dígitos)', () => {
+	it.each(['2392', '11', '02392'])('acepta %s', (v) => {
+		expect(caracteristicaTelefono()(v)).toBeNull();
+	});
+	it.each(['1', '123456', '23a2', '23 92'])('rechaza %s', (v) => {
+		expect(caracteristicaTelefono()(v)).toBe('Usá solo números, sin espacios ni guiones');
+	});
+});
+
+describe('CUIT argentino (RF-15, módulo 11)', () => {
+	it.each(['20123456786', '27234567816', '20987654334', '30567891255', '20-12345678-6'])(
+		'acepta %s',
+		(v) => {
+			expect(esCuitValido(v)).toBe(true);
+			expect(cuit()(v)).toBeNull();
+		}
+	);
+	it.each(['20123456789', '12345678901', '123', 'abcdefghijk'])('rechaza %s', (v) => {
+		expect(esCuitValido(v)).toBe(false);
+		expect(cuit()(v)).toBe('Ingresá un CUIT válido de 11 dígitos');
 	});
 });
 
@@ -114,5 +161,55 @@ describe('validateForm', () => {
 		expect(validateForm({} as Record<string, string>, { nombre: [required()] })).toEqual({
 			nombre: 'Este campo es obligatorio'
 		});
+	});
+});
+
+describe('formatearFechaAR (zona Argentina, sin hack UTC)', () => {
+	it('formatea YYYY-MM-DD en español', () => {
+		const texto = formatearFechaAR('2026-10-13');
+		expect(texto).toContain('13');
+		expect(texto).toContain('octubre');
+	});
+
+	it('devuelve el input si no es fecha válida', () => {
+		expect(formatearFechaAR('no-fecha')).toBe('no-fecha');
+	});
+});
+
+describe('esTurnoPasado', () => {
+	it('ayer es pasado, hoy y mañana no', () => {
+		expect(esTurnoPasado('2026-10-12', '2026-10-13')).toBe(true);
+		expect(esTurnoPasado('2026-10-13', '2026-10-13')).toBe(false);
+		expect(esTurnoPasado('2026-10-14', '2026-10-13')).toBe(false);
+	});
+});
+
+describe('constancia de CUIT', () => {
+	it('acepta vacío (opcional) y URLs http(s) con extensión válida', () => {
+		expect(esConstanciaValida('')).toBe(true);
+		expect(esConstanciaValida('https://ejemplo.com/constancia.pdf')).toBe(true);
+		expect(esConstanciaValida('http://x.com/a.JPG')).toBe(true);
+	});
+
+	it('rechaza no-URL, ftp y extensiones raras', () => {
+		expect(esConstanciaValida('no-es-url')).toBe(false);
+		expect(esConstanciaValida('ftp://x.com/a.pdf')).toBe(false);
+		expect(esConstanciaValida('https://x.com/a.exe')).toBe(false);
+	});
+
+	it('el validador de formulario respeta lo mismo', () => {
+		expect(constanciaCuit()('https://x.com/a.pdf')).toBeNull();
+		expect(constanciaCuit()('https://x.com/a.exe')).not.toBeNull();
+	});
+
+	it('el archivo no puede ser otro tipo ni mayor a 5MB', () => {
+		const pdf = new File(['x'], 'c.pdf', { type: 'application/pdf' });
+		expect(validarArchivoConstancia(pdf)).toBeNull();
+		const exe = new File(['x'], 'c.exe', { type: 'application/x-msdownload' });
+		expect(validarArchivoConstancia(exe)).not.toBeNull();
+		const grande = new File([new Uint8Array(6 * 1024 * 1024)], 'c.pdf', {
+			type: 'application/pdf'
+		});
+		expect(validarArchivoConstancia(grande)).not.toBeNull();
 	});
 });
