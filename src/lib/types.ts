@@ -20,6 +20,8 @@ export interface TelefonoEmpresa {
 	id?: number;
 	numero: string;
 	etiqueta?: string;
+	/** Canal preferido de ese número; si falta, manda el `modo_contacto` del comercio. */
+	modo_contacto?: 'llamada' | 'mensaje' | 'ambos';
 }
 
 export interface Empresa {
@@ -39,6 +41,14 @@ export interface Empresa {
 	calificacion_promedio?: number;
 	calificacion_cantidad?: number;
 	verificado?: boolean;
+	/** Flujo de acreditación comercial (RF-15). En PostgreSQL: enum + columnas cuit/constancia. */
+	verificado_estado?: 'verificado' | 'pendiente' | 'rechazado' | 'sin_solicitar';
+	/** CUIT argentino de 11 dígitos (solo dígitos, sin guiones). */
+	cuit?: string;
+	/** URL del comprobante / constancia fiscal adjuntada por el dueño. */
+	constancia_cuit_url?: string;
+	/** Slug SEO-friendly único (`estilo-urbano-peluqueria`). Cae a `id` si falta. */
+	slug?: string;
 	/** Coordenadas (WGS84) para el mapa; null/ausente si el comercio todavía no está geolocalizado. */
 	lat?: number | null;
 	lng?: number | null;
@@ -57,6 +67,8 @@ export interface Empresa {
 export interface Publicidad {
 	id: string;
 	empresa_id: number;
+	/** Slug SEO del comercio (si se conoce); el carrusel prefiere slug y cae a id. */
+	empresa_slug?: string;
 	titulo: string;
 	descripcion: string;
 	imagen_url: string;
@@ -75,6 +87,9 @@ export interface MiTurno {
 	hora: string;
 	estado: string;
 	empresa_nombre: string;
+	/** Para enlazar a la ficha sin otro fetch. Opcional por compat con backend viejo. */
+	empresa_id?: number;
+	empresa_slug?: string;
 }
 
 /** Turno visto desde el panel del comercio (con el nombre del cliente). */
@@ -114,4 +129,7 @@ export interface PuntoMapa {
 	nombre: string;
 	lat: number;
 	lng: number;
+	/** Slug SEO para popup/enlace; cae a id si falta. */
+	slug?: string;
+	verificado?: boolean;
 }
