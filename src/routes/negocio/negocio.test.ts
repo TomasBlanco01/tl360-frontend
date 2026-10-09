@@ -76,6 +76,12 @@ beforeEach(() => {
 const abrirPestania = (nombre: string) =>
 	userEvent.click(screen.getByRole('button', { name: nombre }));
 
+// 2.6 La vista inicial es "Turnos recibidos"; los tests de ficha navegan a su solapa.
+const abrirFicha = async () => {
+	await userEvent.click(screen.getByRole('button', { name: 'Mi Ficha' }));
+	await screen.findByDisplayValue('Estilo Urbano');
+};
+
 describe('acceso', () => {
 	it('sin sesión manda a iniciar sesión', async () => {
 		auth.logout();
@@ -92,7 +98,7 @@ describe('acceso', () => {
 
 	it('pide solo los comercios del usuario, no todo el catálogo', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		expect(get).toHaveBeenCalledWith('/empresas?admin_id=101');
 		expect(get).not.toHaveBeenCalledWith('/empresas');
 	});
@@ -101,7 +107,7 @@ describe('acceso', () => {
 describe('Mi Ficha', () => {
 	it('carga los datos del comercio en el formulario', async () => {
 		render(Negocio);
-		expect(await screen.findByDisplayValue('Estilo Urbano')).toBeInTheDocument();
+		await abrirFicha();
 		expect(screen.getByDisplayValue('Villegas 482')).toBeInTheDocument();
 		expect(screen.getByLabelText('Característica')).toHaveValue('2392');
 		expect(screen.getByLabelText('Número')).toHaveValue('411234');
@@ -118,6 +124,7 @@ describe('Mi Ficha', () => {
 	it('sin comercio invita a crearlo', async () => {
 		backend({ comercio: null });
 		render(Negocio);
+		await userEvent.click(screen.getByRole('button', { name: 'Mi Ficha' }));
 		expect(await screen.findByText(/Todavía no tenés un comercio cargado/)).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Crear comercio' })).toBeInTheDocument();
 	});
@@ -125,6 +132,7 @@ describe('Mi Ficha', () => {
 	it('valida los campos obligatorios antes de guardar', async () => {
 		backend({ comercio: null });
 		render(Negocio);
+		await userEvent.click(screen.getByRole('button', { name: 'Mi Ficha' }));
 		await userEvent.click(await screen.findByRole('button', { name: 'Crear comercio' }));
 		expect((await screen.findAllByText('Este campo es obligatorio')).length).toBeGreaterThanOrEqual(
 			3
@@ -134,7 +142,7 @@ describe('Mi Ficha', () => {
 
 	it('la duración del turno es obligatoria solo si ofrece turnos online', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		await userEvent.clear(screen.getByLabelText(/Duración del turno/));
 		await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
 		expect(await screen.findByText('Este campo es obligatorio')).toBeInTheDocument();
@@ -153,7 +161,8 @@ describe('Mi Ficha', () => {
 
 	it('guardar cambios manda la ficha completa y los teléfonos', async () => {
 		render(Negocio);
-		const nombre = await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
+		const nombre = screen.getByDisplayValue('Estilo Urbano');
 		await userEvent.clear(nombre);
 		await userEvent.type(nombre, 'Estilo Urbano 2');
 		await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
@@ -182,6 +191,7 @@ describe('Mi Ficha', () => {
 		backend({ comercio: null });
 		post.mockResolvedValue(empresa({ id: 9, admin_id: 101 }));
 		render(Negocio);
+		await userEvent.click(screen.getByRole('button', { name: 'Mi Ficha' }));
 		await screen.findByRole('button', { name: 'Crear comercio' });
 		await userEvent.type(screen.getByLabelText(/^Nombre/), 'Mi local');
 		await userEvent.type(screen.getByLabelText(/^Dirección/), 'Calle 1');
@@ -215,7 +225,7 @@ describe('Mi Ficha', () => {
 	it('muestra el error del backend (por ejemplo una URL inválida)', async () => {
 		put.mockRejectedValue(new ApiError(400, 'instagram debe ser una URL http(s) válida'));
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
 		expect(
 			await screen.findByText('instagram debe ser una URL http(s) válida')
@@ -224,11 +234,13 @@ describe('Mi Ficha', () => {
 
 	it('permite quitar y agregar teléfonos y fotos', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		expect(await screen.findByDisplayValue('Emanuel')).toBeInTheDocument();
 		await userEvent.click(screen.getByRole('button', { name: 'Quitar teléfono' }));
 		expect(screen.queryByDisplayValue('Emanuel')).not.toBeInTheDocument();
-		await userEvent.click(screen.getByRole('button', { name: '+ Agregar otro teléfono de contacto' }));
+		await userEvent.click(
+			screen.getByRole('button', { name: '+ Agregar otro teléfono de contacto' })
+		);
 		expect(screen.getAllByPlaceholderText('Número')).toHaveLength(1);
 
 		expect(screen.getByDisplayValue('https://x.com/a.jpg')).toBeInTheDocument();
@@ -243,6 +255,7 @@ describe('Horarios', () => {
 	it('sin comercio pide cargar primero la ficha', async () => {
 		backend({ comercio: null });
 		render(Negocio);
+		await userEvent.click(screen.getByRole('button', { name: 'Mi Ficha' }));
 		await screen.findByRole('button', { name: 'Crear comercio' });
 		await abrirPestania('Horarios');
 		expect(screen.getByText('Primero cargá tu ficha')).toBeInTheDocument();
@@ -250,7 +263,7 @@ describe('Horarios', () => {
 
 	it('muestra los rangos de cada día', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		await abrirPestania('Horarios');
 		expect(await screen.findByLabelText('Apertura Lunes 1')).toHaveValue('09:00');
 		expect(screen.getByLabelText('Cierre Lunes 1')).toHaveValue('12:00');
@@ -261,7 +274,7 @@ describe('Horarios', () => {
 
 	it('agrega y quita rangos y guarda todo junto', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		await abrirPestania('Horarios');
 		await screen.findByLabelText('Apertura Lunes 1');
 
@@ -283,7 +296,7 @@ describe('Horarios', () => {
 
 	it('permite editar la hora de apertura y de cierre de un rango', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		await abrirPestania('Horarios');
 		fireEvent.change(await screen.findByLabelText('Apertura Lunes 1'), {
 			target: { value: '08:30' }
@@ -299,7 +312,7 @@ describe('Horarios', () => {
 
 	it('no guarda un rango con el cierre antes de la apertura', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		await abrirPestania('Horarios');
 		fireEvent.change(await screen.findByLabelText('Cierre Lunes 1'), {
 			target: { value: '08:00' }
@@ -316,7 +329,7 @@ describe('Horarios', () => {
 			new ApiError(400, "Franja horaria inválida: '20:00-10:00' (se espera HH:MM-HH:MM)")
 		);
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
+		await abrirFicha();
 		await abrirPestania('Horarios');
 		await userEvent.click(await screen.findByRole('button', { name: 'Guardar horarios' }));
 		expect(await screen.findByText(/Franja horaria inválida/)).toBeInTheDocument();
@@ -345,8 +358,7 @@ describe('Turnos recibidos', () => {
 	it('lista los turnos con el cliente y la hora', async () => {
 		backend({ turnos });
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
-		await abrirPestania('Turnos recibidos');
+		// 2.6 "Turnos recibidos" ya es la vista inicial: no hay que navegar.
 		expect(await screen.findByText('Martina Gómez')).toBeInTheDocument();
 		expect(screen.getByText('09:00 hs')).toBeInTheDocument();
 		expect(screen.getByText('Lucas Pérez')).toBeInTheDocument();
@@ -356,24 +368,18 @@ describe('Turnos recibidos', () => {
 
 	it('sin turnos lo dice', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
-		await abrirPestania('Turnos recibidos');
 		expect(await screen.findByText('Todavía no recibiste turnos')).toBeInTheDocument();
 	});
 
 	it('si el comercio no ofrece turnos online, lo aclara', async () => {
 		backend({ comercio: { ...propia, turnos_habilitados: false } });
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
-		await abrirPestania('Turnos recibidos');
-		expect(screen.getByText('No ofrecés reserva de turnos')).toBeInTheDocument();
+		expect(await screen.findByText('No ofrecés reserva de turnos')).toBeInTheDocument();
 	});
 
 	it('si falla la carga, muestra el motivo', async () => {
 		backend({ turnos: new ApiError(403, 'No podés editar una empresa que no es tuya') });
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
-		await abrirPestania('Turnos recibidos');
 		expect(
 			await screen.findByText('No podés editar una empresa que no es tuya')
 		).toBeInTheDocument();
@@ -384,6 +390,7 @@ describe('Publicidades', () => {
 	it('sin comercio pide cargar primero la ficha', async () => {
 		backend({ comercio: null });
 		render(Negocio);
+		await userEvent.click(screen.getByRole('button', { name: 'Mi Ficha' }));
 		await screen.findByRole('button', { name: 'Crear comercio' });
 		await abrirPestania('Publicidades');
 		expect(screen.getByText('Primero cargá tu ficha')).toBeInTheDocument();
@@ -398,7 +405,6 @@ describe('Publicidades', () => {
 			imagen_url: ''
 		});
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
 		await abrirPestania('Publicidades');
 		const titulo = await screen.findByLabelText('Título');
 		await userEvent.type(titulo, '2x1');
@@ -418,9 +424,25 @@ describe('Publicidades', () => {
 
 	it('no publica sin título', async () => {
 		render(Negocio);
-		await screen.findByDisplayValue('Estilo Urbano');
 		await abrirPestania('Publicidades');
 		await userEvent.click(await screen.findByRole('button', { name: 'Publicar' }));
 		expect(post).not.toHaveBeenCalled();
+	});
+});
+
+describe('vista inicial y verificación', () => {
+	it("la pestaña inicial es 'Turnos recibidos' (2.6)", async () => {
+		backend({ turnos: [] });
+		render(Negocio);
+		expect(await screen.findByText('Todavía no recibiste turnos')).toBeInTheDocument();
+		expect(screen.queryByDisplayValue('Estilo Urbano')).not.toBeInTheDocument();
+	});
+
+	it('la ficha muestra el canal de contacto y el CUIT', async () => {
+		render(Negocio);
+		await abrirFicha();
+		expect(screen.getByLabelText(/¿Cómo te contactan/)).toBeInTheDocument();
+		expect(screen.getByLabelText(/CUIT \(11 dígitos\)/)).toBeInTheDocument();
+		expect(screen.getByText(/Ubicación en el mapa/)).toBeInTheDocument();
 	});
 });
