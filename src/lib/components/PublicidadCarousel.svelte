@@ -12,7 +12,10 @@
 	let autoplayTimer: ReturnType<typeof setInterval> | undefined;
 	let cardEls: (HTMLDivElement | null)[] = [];
 	let montado = false;
-	const reduceMovimiento = browser && matchMedia('(prefers-reduced-motion: reduce)').matches;
+	const reduceMovimiento =
+		browser &&
+		typeof matchMedia === 'function' &&
+		matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 	// 2.5 Swipe táctil: si el desplazamiento horizontal supera 50px, cambia de tarjeta.
 	let tactoX: number | null = null;
