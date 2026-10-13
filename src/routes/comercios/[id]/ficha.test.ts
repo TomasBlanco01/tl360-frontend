@@ -71,7 +71,11 @@ describe('ficha del comercio', () => {
 	it('si el comercio no existe lo informa', async () => {
 		get.mockRejectedValue(new Error('404'));
 		render(Ficha);
-		expect(await screen.findByText('No se encontró el comercio solicitado.')).toBeInTheDocument();
+		expect(await screen.findByText('No encontramos ese comercio')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'Ver directorio' })).toHaveAttribute(
+			'href',
+			'/comercios'
+		);
 	});
 
 	it('muestra los datos del comercio', async () => {

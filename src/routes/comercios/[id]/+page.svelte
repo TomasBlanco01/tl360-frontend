@@ -7,7 +7,10 @@
 	import { favoritos } from '$lib/stores/favoritos.svelte';
 	import { estaAbiertoAhora, agruparHorarios } from '$lib/turnos';
 	import { enlaceLlamada, enlaceWhatsApp, formatearTelefono } from '$lib/contacto';
+	import { urlReservar } from '$lib/slug';
+	import { toast } from '$lib/_auditoria/toast.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -20,7 +23,9 @@
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
-	const empresaId = $derived(Number(page.params.id));
+	// 1.1 El parámetro puede ser id numérico o slug SEO (`/comercios/estilo-urbano-peluqueria`).
+	const slugOId = $derived(page.params.id ?? '');
+	const empresaId = $derived(Number(slugOId));
 
 	let empresa = $state<Empresa | null>(null);
 	let horarios = $state<HorariosPorDia>({});
@@ -29,16 +34,24 @@
 	const gruposHorario = $derived(agruparHorarios(horarios));
 
 	$effect(() => {
+		const param = slugOId;
 		cargando = true;
-		Promise.all([
-			api.get<Empresa>(`/empresas/${empresaId}`),
-			api.get<HorariosPorDia>(`/empresas/horarios/${empresaId}`)
-		])
-			.then(([e, h]) => {
+		api
+			.get<Empresa>(`/empresas/${param}`)
+			.then((e) => {
 				empresa = e;
+				// SEO: la URL canónica es el slug. Si se entró por id numérico, reemplazar sin recargar.
+				if (e.slug && param !== e.slug && /^\d+$/.test(param)) {
+					goto(`/comercios/${e.slug}`, { replaceState: true, noScroll: true });
+				}
+				return api.get<HorariosPorDia>(`/empresas/horarios/${e.id}`);
+			})
+			.then((h) => {
 				horarios = h;
 			})
-			.catch((err) => console.error('Error cargando comercio:', err))
+			.catch((err) => {
+				console.error('Error cargando comercio:', err);
+			})
 			.finally(() => (cargando = false));
 	});
 
@@ -53,13 +66,15 @@
 	const esDueno = $derived(!!auth.user && empresa?.admin_id === auth.user.id);
 
 	$effect(() => {
+		const id = empresa?.id ?? empresaId;
 		api
-			.get<Resena[]>(`/empresas/${empresaId}/calificaciones`)
+			.get<Resena[]>(`/empresas/${id}/calificaciones`)
 			.then((r) => (resenas = r))
 			.catch(() => (resenas = []));
 	});
 
 	async function enviarResena() {
+		if (!empresa) return;
 		mensajeResena = '';
 		if (puntaje < 1) {
 			errorResena = true;
@@ -68,21 +83,23 @@
 		}
 		enviandoResena = true;
 		try {
-			await api.post(`/empresas/${empresaId}/calificaciones`, {
+			await api.post(`/empresas/${empresa.id}/calificaciones`, {
 				puntaje,
 				comentario: comentario.trim() || undefined
 			});
 			const [e, r] = await Promise.all([
-				api.get<Empresa>(`/empresas/${empresaId}`),
-				api.get<Resena[]>(`/empresas/${empresaId}/calificaciones`)
+				api.get<Empresa>(`/empresas/${empresa.id}`),
+				api.get<Resena[]>(`/empresas/${empresa.id}/calificaciones`)
 			]);
 			empresa = e;
 			resenas = r;
 			errorResena = false;
 			mensajeResena = '¡Gracias por tu calificación!';
+			toast.exito('¡Gracias por tu calificación!');
 		} catch (err) {
 			errorResena = true;
 			mensajeResena = err instanceof ApiError ? err.message : 'No se pudo enviar la calificación.';
+			toast.error(mensajeResena);
 		} finally {
 			enviandoResena = false;
 		}
@@ -95,16 +112,19 @@
 	let errorReporte = $state(false);
 
 	async function enviarReporte() {
+		if (!empresa) return;
 		mensajeReporte = '';
 		errorReporte = false;
 		try {
-			await api.post(`/empresas/${empresaId}/reportes`, { motivo: motivoReporte });
+			await api.post(`/empresas/${empresa.id}/reportes`, { motivo: motivoReporte });
 			mensajeReporte = 'Reporte enviado. Gracias por avisarnos.';
 			motivoReporte = '';
 			reportando = false;
+			toast.exito('Reporte enviado. Gracias por avisarnos.');
 		} catch (err) {
 			errorReporte = true;
 			mensajeReporte = err instanceof ApiError ? err.message : 'No se pudo enviar el reporte.';
+			toast.error(mensajeReporte);
 		}
 	}
 
@@ -114,12 +134,14 @@
 		if (!empresa) return;
 		mensajeSello = '';
 		try {
-			const res = await api.put<{ verificado: boolean }>(`/empresas/${empresaId}/verificado`, {
+			const res = await api.put<{ verificado: boolean }>(`/empresas/${empresa.id}/verificado`, {
 				verificado: !empresa.verificado
 			});
 			empresa = { ...empresa, verificado: res.verificado };
+			toast.exito(res.verificado ? 'Comercio verificado.' : 'Sello de verificado quitado.');
 		} catch (err) {
 			mensajeSello = err instanceof ApiError ? err.message : 'No se pudo cambiar el sello.';
+			toast.error(mensajeSello);
 		}
 	}
 
@@ -141,11 +163,15 @@
 	);
 
 	function toggleFavorito() {
+		if (!empresa) return;
 		if (!auth.user) {
 			goto('/auth/login');
 			return;
 		}
-		favoritos.toggle(empresaId);
+		const era = favoritos.isFavorito(empresa.id);
+		favoritos.toggle(empresa.id);
+		if (era) toast.exito('Comercio quitado de favoritos.');
+		else toast.exito('Comercio añadido a favoritos.');
 	}
 
 	function contactar(modo: 'llamada' | 'mensaje', numero: string) {
@@ -179,14 +205,23 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{empresa?.nombre ?? 'Comercio'} — TL360</title>
+</svelte:head>
+
 {#if cargando}
 	<p class="mx-auto max-w-3xl px-4 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
 		Cargando comercio...
 	</p>
 {:else if !empresa}
-	<p class="mx-auto max-w-3xl px-4 py-10 text-center text-sm text-danger-600">
-		No se encontró el comercio solicitado.
-	</p>
+	<div class="mx-auto max-w-3xl px-4 py-10">
+		<EmptyState
+			title="No encontramos ese comercio"
+			description="Puede que la ficha haya cambiado de nombre o ya no exista."
+		>
+			<Button href="/comercios">Ver directorio</Button>
+		</EmptyState>
+	</div>
 {:else}
 	<div class="mx-auto max-w-3xl px-4 py-8">
 		<Card class="p-6">
@@ -219,13 +254,13 @@
 				</div>
 
 				<button
-					class="text-2xl transition {favoritos.isFavorito(empresaId)
+					class="text-2xl transition {empresa && favoritos.isFavorito(empresa.id)
 						? 'text-danger-600'
 						: 'hover:text-danger-400 text-gray-300'}"
 					onclick={toggleFavorito}
 					aria-label="Marcar como favorito"
 				>
-					{favoritos.isFavorito(empresaId) ? '♥' : '♡'}
+					{empresa && favoritos.isFavorito(empresa.id) ? '♥' : '♡'}
 				</button>
 			</div>
 
@@ -280,7 +315,7 @@
 
 			<div class="mt-6 flex flex-wrap items-center gap-3">
 				{#if empresa.turnos_habilitados !== false}
-					<Button size="lg" onclick={() => goto(`/comercios/${empresaId}/reservar`)}>
+					<Button size="lg" onclick={() => empresa && goto(urlReservar(empresa))}>
 						Reservar turno
 					</Button>
 				{:else if telefonos.length > 0}
@@ -331,11 +366,12 @@
 					</p>
 					<div class="flex flex-col gap-2">
 						{#each telefonos as tel, i (tel.numero + i)}
+							{@const canal = tel.modo_contacto ?? empresa.modo_contacto ?? 'ambos'}
 							<div class="flex flex-wrap items-center gap-3">
 								<span class="text-sm text-gray-700 dark:text-gray-300">
 									{tel.etiqueta ? `${tel.etiqueta} — ` : ''}{formatearTelefono(tel.numero)}
 								</span>
-								{#if empresa.modo_contacto !== 'mensaje'}
+								{#if canal !== 'mensaje'}
 									<Button
 										variant="outline"
 										size="sm"
@@ -344,7 +380,7 @@
 										Llamar
 									</Button>
 								{/if}
-								{#if empresa.modo_contacto !== 'llamada'}
+								{#if canal !== 'llamada'}
 									<Button
 										variant="outline"
 										size="sm"
@@ -375,6 +411,7 @@
 									alt={empresa.nombre}
 									class="h-32 w-44 rounded-lg object-cover"
 									loading="lazy"
+									decoding="async"
 								/>
 							</button>
 						{/each}
@@ -420,6 +457,7 @@
 						src={empresa.fotos[fotoAbierta]}
 						alt="{empresa.nombre} — foto {fotoAbierta + 1}"
 						class="max-h-[85vh] max-w-[90vw] rounded-lg object-contain"
+						decoding="async"
 					/>
 					{#if totalFotos > 1}
 						<p class="absolute bottom-4 text-sm text-white/80">
