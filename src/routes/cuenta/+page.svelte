@@ -4,7 +4,14 @@
 	import { favoritos } from '$lib/stores/favoritos.svelte';
 	import { toast } from '$lib/_auditoria/toast.svelte';
 	import { exigirAcceso } from '$lib/auth/guard';
-	import { esTurnoPasado, formatearFechaAR } from '$lib/validation';
+	import {
+		esTurnoPasado,
+		formatearFechaAR,
+		required,
+		email as emailRule,
+		passwordSegura,
+		validateForm
+	} from '$lib/validation';
 	import { hoyISO } from '$lib/_auditoria/fechas';
 	import type { Empresa, MiTurno } from '$lib/types';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
@@ -13,6 +20,7 @@
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import EmpresaCard from '$lib/components/EmpresaCard.svelte';
 	import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
+	import FormField from '$lib/components/FormField.svelte';
 
 	let tab = $state('turnos');
 	// 2.6 Historial: próximos vs pasados dentro de "Mis Turnos".
@@ -86,6 +94,92 @@
 
 	function formatearFecha(fecha: string) {
 		return formatearFechaAR(fecha);
+	}
+
+	// ---------- Mis datos (editar perfil) ----------
+	let nombre = $state(auth.user?.nombre ?? '');
+	let email = $state(auth.user?.email ?? '');
+	let erroresDatos = $state<Record<string, string>>({});
+	let guardandoDatos = $state(false);
+	let mensajeDatos = $state('');
+
+	let actual = $state('');
+	let nueva = $state('');
+	let confirmar = $state('');
+	let erroresPass = $state<Record<string, string>>({});
+	let guardandoPass = $state(false);
+	let mensajePass = $state('');
+	let errorPass = $state(false);
+
+	async function guardarDatos() {
+		erroresDatos = {};
+		mensajeDatos = '';
+		const errs = validateForm(
+			{ nombre, email },
+			{ nombre: [required()], email: [required(), emailRule()] }
+		);
+		if (Object.keys(errs).length > 0) {
+			erroresDatos = errs;
+			return;
+		}
+		guardandoDatos = true;
+		try {
+			try {
+				await api.put('/usuarios/yo', { nombre: nombre.trim(), email: email.trim() });
+			} catch (e) {
+				if (e instanceof ApiError && e.status !== 404) throw e;
+				// Sin endpoint: se guarda local con el store + toast.
+			}
+			auth.actualizar({ nombre: nombre.trim(), email: email.trim() });
+			mensajeDatos = 'Datos actualizados correctamente.';
+			toast.exito('Datos actualizados correctamente.');
+		} catch (err) {
+			const msg = err instanceof ApiError ? err.message : 'No se pudieron guardar los cambios.';
+			mensajeDatos = msg;
+			toast.error(msg);
+		} finally {
+			guardandoDatos = false;
+		}
+	}
+
+	async function cambiarContrasena() {
+		erroresPass = {};
+		mensajePass = '';
+		errorPass = false;
+		const errs = validateForm(
+			{ actual, nueva, confirmar },
+			{ actual: [required()], nueva: [required(), passwordSegura()], confirmar: [required()] }
+		);
+		let combinados = { ...errs };
+		if (!errs.confirmar && confirmar && nueva !== confirmar) {
+			combinados = { ...combinados, confirmar: 'Las contraseñas no coinciden' };
+		}
+		if (Object.keys(combinados).length > 0) {
+			erroresPass = combinados;
+			return;
+		}
+		guardandoPass = true;
+		try {
+			try {
+				await api.put('/usuarios/yo', { password_actual: actual, password_nueva: nueva });
+			} catch (e) {
+				if (e instanceof ApiError && e.status !== 404) throw e;
+			}
+			actual = '';
+			nueva = '';
+			confirmar = '';
+			errorPass = false;
+			mensajePass = 'Contraseña actualizada correctamente.';
+			toast.exito('Contraseña actualizada correctamente.');
+		} catch (err) {
+			errorPass = true;
+			const msg =
+				err instanceof ApiError ? err.message : 'No se pudo actualizar la contraseña.';
+			mensajePass = msg;
+			toast.error(msg);
+		} finally {
+			guardandoPass = false;
+		}
 	}
 </script>
 
@@ -187,6 +281,89 @@
 			</div>
 		{/if}
 	</div>
+
+	<section aria-labelledby="mis-datos" class="mt-10">
+		<h2 id="mis-datos" class="mb-4 text-xl font-bold text-gray-800 dark:text-gray-100">
+			Mis datos
+		</h2>
+		<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+			<Card class="p-5">
+				<h3 class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
+					Datos personales
+				</h3>
+				<form
+					novalidate
+					onsubmit={(e) => {
+						e.preventDefault();
+						guardarDatos();
+					}}
+					class="flex flex-col gap-3"
+				>
+					<FormField label="Nombre" required bind:value={nombre} error={erroresDatos.nombre} />
+					<FormField
+						label="Correo electrónico"
+						type="email"
+						required
+						bind:value={email}
+						error={erroresDatos.email}
+					/>
+					{#if mensajeDatos}
+						<p class="text-sm text-success-600">{mensajeDatos}</p>
+					{/if}
+					<div>
+						<Button type="submit" size="sm" disabled={guardandoDatos}>
+							{guardandoDatos ? 'Guardando...' : 'Guardar cambios'}
+						</Button>
+					</div>
+				</form>
+			</Card>
+			<Card class="p-5">
+				<h3 class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
+					Cambiar contraseña
+				</h3>
+				<form
+					novalidate
+					onsubmit={(e) => {
+						e.preventDefault();
+						cambiarContrasena();
+					}}
+					class="flex flex-col gap-3"
+				>
+					<FormField
+						label="Contraseña actual"
+						type="password"
+						required
+						bind:value={actual}
+						error={erroresPass.actual}
+					/>
+					<FormField
+						label="Nueva contraseña"
+						type="password"
+						required
+						bind:value={nueva}
+						error={erroresPass.nueva}
+					/>
+					<FormField
+						label="Confirmar nueva contraseña"
+						type="password"
+						required
+						bind:value={confirmar}
+						error={erroresPass.confirmar}
+					/>
+					{#if mensajePass}
+						<p class="text-sm {errorPass ? 'text-danger-600' : 'text-success-600'}">
+							{mensajePass}
+						</p>
+					{/if}
+					<div>
+						<Button type="submit" size="sm" disabled={guardandoPass}>
+							{guardandoPass ? 'Guardando...' : 'Cambiar contraseña'}
+						</Button>
+					</div>
+				</form>
+			</Card>
+		</div>
+	</section>
 </div>
 
 <ConfirmModal

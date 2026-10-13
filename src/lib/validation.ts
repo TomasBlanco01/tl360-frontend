@@ -67,6 +67,25 @@ export const minLength =
 	(value) =>
 		value.trim() === '' || value.trim().length >= min ? null : message;
 
+/**
+ * Contraseña segura: mínimo 8 caracteres con mayúscula, minúscula y número.
+ */
+export function esPasswordSegura(password: string): boolean {
+	const v = (password ?? '').trim();
+	if (v.length < 8) return false;
+	return /[a-z]/.test(v) && /[A-Z]/.test(v) && /[0-9]/.test(v);
+}
+
+export const passwordSegura =
+	(
+		message = 'La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula y número'
+	): Validator =>
+	(value) => {
+		const v = value ?? '';
+		if (v.trim() === '') return null;
+		return esPasswordSegura(v) ? null : message;
+	};
+
 export const numericPositive =
 	(message = 'Debe ser un número mayor a 0'): Validator =>
 	(value) =>

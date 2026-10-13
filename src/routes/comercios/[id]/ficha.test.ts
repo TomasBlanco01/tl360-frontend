@@ -62,10 +62,16 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('ficha del comercio', () => {
-	it('mientras carga muestra un aviso', () => {
+	it('mientras carga muestra un aviso y el enlace Volver', () => {
 		get.mockImplementation(() => new Promise(() => {}));
 		render(Ficha);
 		expect(screen.getByText('Cargando comercio...')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: /Volver/ })).toHaveAttribute('href', '/comercios');
+	});
+
+	it('con empresa muestra Volver al directorio arriba', async () => {
+		await cargarFicha();
+		expect(screen.getByRole('link', { name: /Volver/ })).toHaveAttribute('href', '/comercios');
 	});
 
 	it('si el comercio no existe lo informa', async () => {

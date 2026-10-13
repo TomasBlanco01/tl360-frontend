@@ -35,6 +35,18 @@ class AuthStore {
 			localStorage.removeItem('user');
 		}
 	}
+
+	actualizar(datos: Partial<Usuario>) {
+		if (!this.user) return;
+		this.user = { ...this.user, ...datos };
+		if (browser) {
+			try {
+				localStorage.setItem('user', JSON.stringify(this.user));
+			} catch {
+				// almacenamiento no disponible (SSR/tests)
+			}
+		}
+	}
 }
 
 export const auth = new AuthStore();

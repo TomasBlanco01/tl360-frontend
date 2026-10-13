@@ -19,6 +19,7 @@ vi.mock('$lib/api', async (original) => {
 
 const get = api.get as ReturnType<typeof vi.fn>;
 const borrar = api.delete as ReturnType<typeof vi.fn>;
+const put = api.put as ReturnType<typeof vi.fn>;
 
 const ana = { id: 3, nombre: 'Ana Pérez', email: 'ana@test.com', rol: 'cliente' as const };
 const turnos = [
@@ -50,6 +51,7 @@ function backend(mios: MiTurno[] = turnos) {
 beforeEach(() => {
 	get.mockReset();
 	borrar.mockReset().mockResolvedValue({});
+	put.mockReset().mockResolvedValue({});
 	auth.login('tok', ana);
 	favoritos.ids = [];
 	backend();
@@ -188,6 +190,64 @@ describe('Mi cuenta', () => {
 			await userEvent.click(screen.getByRole('button', { name: /Turnos pasados/ }));
 			expect(await screen.findByText('Vieja')).toBeInTheDocument();
 			expect(screen.queryByText('Futura')).not.toBeInTheDocument();
+		});
+	});
+
+	describe('mis datos', () => {
+		it('muestra la sección Mis datos con nombre y correo', async () => {
+			render(Cuenta);
+			await screen.findByText('Peluquería Central');
+			expect(screen.getByRole('heading', { name: 'Mis datos' })).toBeInTheDocument();
+			expect(screen.getByLabelText(/^Nombre/)).toHaveValue('Ana Pérez');
+			expect(screen.getByLabelText(/Correo/)).toHaveValue('ana@test.com');
+			expect(screen.getByLabelText(/Contraseña actual/)).toBeInTheDocument();
+			expect(screen.getByLabelText(/Nueva contraseña/)).toBeInTheDocument();
+			expect(screen.getByLabelText(/Confirmar nueva/)).toBeInTheDocument();
+		});
+
+		it('guardar datos llama a /usuarios/yo y actualiza el usuario', async () => {
+			render(Cuenta);
+			await screen.findByText('Peluquería Central');
+			const campoNombre = screen.getByLabelText(/^Nombre/) as HTMLInputElement;
+			await userEvent.clear(campoNombre);
+			await userEvent.type(campoNombre, 'Ana Nueva');
+			await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+			await vi.waitFor(() =>
+				expect(put).toHaveBeenCalledWith(
+					'/usuarios/yo',
+					expect.objectContaining({ nombre: 'Ana Nueva' })
+				)
+			);
+			expect(auth.user?.nombre).toBe('Ana Nueva');
+			expect(
+				await screen.findByText('Datos actualizados correctamente.')
+			).toBeInTheDocument();
+		});
+
+		it('cambiar contraseña avisa si no coinciden', async () => {
+			render(Cuenta);
+			await screen.findByText('Peluquería Central');
+			await userEvent.type(screen.getByLabelText(/Contraseña actual/), 'Vieja1234');
+			await userEvent.type(screen.getByLabelText(/Nueva contraseña/), 'Nueva1234');
+			await userEvent.type(screen.getByLabelText(/Confirmar nueva/), 'Distinta1234');
+			await userEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
+			expect(await screen.findByText('Las contraseñas no coinciden')).toBeInTheDocument();
+			expect(put).not.toHaveBeenCalledWith(
+				'/usuarios/yo',
+				expect.objectContaining({ password_nueva: expect.anything() })
+			);
+		});
+
+		it('cambiar contraseña con datos válidos muestra éxito', async () => {
+			render(Cuenta);
+			await screen.findByText('Peluquería Central');
+			await userEvent.type(screen.getByLabelText(/Contraseña actual/), 'Vieja1234');
+			await userEvent.type(screen.getByLabelText(/Nueva contraseña/), 'Nueva1234');
+			await userEvent.type(screen.getByLabelText(/Confirmar nueva/), 'Nueva1234');
+			await userEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
+			expect(
+				await screen.findByText('Contraseña actualizada correctamente.')
+			).toBeInTheDocument();
 		});
 	});
 });

@@ -6,10 +6,12 @@ import {
 	email,
 	esConstanciaValida,
 	esCuitValido,
+	esPasswordSegura,
 	esTurnoPasado,
 	formatearFechaAR,
 	minLength,
 	numericPositive,
+	passwordSegura,
 	phone,
 	required,
 	telefonoSoloDigitos,
@@ -96,6 +98,23 @@ describe('minLength', () => {
 	});
 	it('vacío no es error', () => {
 		expect(minLength(6)('')).toBeNull();
+	});
+});
+
+describe('esPasswordSegura (mínimo 8 con mayúscula, minúscula y número)', () => {
+	it.each(['Clave123', 'Segura99X', 'Abcdef1G'])('acepta %s', (v) => {
+		expect(esPasswordSegura(v)).toBe(true);
+		expect(passwordSegura()(v)).toBeNull();
+	});
+	it.each(['clave123', 'CLAVE123', 'ClaveABC', 'Cla1', '12345678', 'abcdefgh'])(
+		'rechaza %s',
+		(v) => {
+			expect(esPasswordSegura(v)).toBe(false);
+			expect(passwordSegura()(v)).not.toBeNull();
+		}
+	);
+	it('vacío no es error (lo decide required)', () => {
+		expect(passwordSegura()('')).toBeNull();
 	});
 });
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import { navigating } from '$app/state';
 	import NavBar from '$lib/components/NavBar.svelte';
 	import Toaster from '$lib/_auditoria/Toaster.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
@@ -33,6 +34,11 @@
 	class="min-h-screen bg-white text-gray-800 transition-colors duration-300 dark:bg-gray-950 dark:text-gray-100"
 >
 	<NavBar />
+	{#if navigating}
+		<p role="status" class="mx-auto max-w-6xl px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+			Cargando...
+		</p>
+	{/if}
 	<main id="contenido">
 		{@render children()}
 	</main>

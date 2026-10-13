@@ -17,9 +17,13 @@ vi.mock('$lib/api', async (original) => {
 });
 
 const post = api.post as ReturnType<typeof vi.fn>;
+const get = api.get as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
 	auth.logout();
+	post.mockReset();
+	get.mockReset();
+	get.mockResolvedValue([]);
 	vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -105,15 +109,55 @@ describe('página de login', () => {
 });
 
 describe('página de registro', () => {
-	it('valida nombre, correo y una contraseña de al menos 6 caracteres', async () => {
+	it('valida nombre, correo, contraseña segura y confirmación', async () => {
 		render(Register);
 		await escribir(/Correo/, 'mal');
-		await escribir(/Contraseña/, '123');
+		await escribir(/^Contraseña/, '123');
 		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
 		expect(await screen.findByText('Ingresá un correo electrónico válido')).toBeInTheDocument();
-		expect(screen.getByText('Debe tener al menos 6 caracteres')).toBeInTheDocument();
-		expect(screen.getByText('Este campo es obligatorio')).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				'La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula y número'
+			)
+		).toBeInTheDocument();
+		expect((await screen.findAllByText('Este campo es obligatorio')).length).toBeGreaterThanOrEqual(
+			1
+		);
 		expect(post).not.toHaveBeenCalled();
+	});
+
+	it('rechaza una contraseña sin mayúscula, minúscula o número', async () => {
+		render(Register);
+		await escribir(/Nombre/, 'Ana');
+		await escribir(/Correo/, 'ana@test.com');
+		await escribir(/^Contraseña/, 'clave123');
+		await escribir(/Confirmar clave/, 'clave123');
+		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
+		expect(
+			await screen.findByText(
+				'La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula y número'
+			)
+		).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+	});
+
+	it('avisa si la confirmación no coincide', async () => {
+		render(Register);
+		await escribir(/Nombre/, 'Ana');
+		await escribir(/Correo/, 'ana@test.com');
+		await escribir(/^Contraseña/, 'Clave123');
+		await escribir(/Confirmar clave/, 'Otra1234');
+		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
+		expect(await screen.findByText('Las contraseñas no coinciden')).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+	});
+
+	it('ofrece rol cliente por defecto y opción comercio', () => {
+		render(Register);
+		const select = screen.getByLabelText(/Rol/) as HTMLSelectElement;
+		expect(select.value).toBe('cliente');
+		const opciones = [...select.querySelectorAll('option')].map((o) => o.getAttribute('value'));
+		expect(opciones).toEqual(expect.arrayContaining(['cliente', 'comercio']));
 	});
 
 	it('un registro correcto manda los datos y lleva al login', async () => {
@@ -121,24 +165,58 @@ describe('página de registro', () => {
 		render(Register);
 		await escribir(/Nombre/, 'Ana Pérez');
 		await escribir(/Correo/, 'ana@test.com');
-		await escribir(/Contraseña/, 'clave123');
+		await escribir(/^Contraseña/, 'Clave123');
+		await escribir(/Confirmar clave/, 'Clave123');
 		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
 		await waitFor(() => expect(goto).toHaveBeenCalledWith('/auth/login'));
 		expect(post).toHaveBeenCalledWith('/auth/register', {
 			nombre: 'Ana Pérez',
 			email: 'ana@test.com',
-			contraseña: 'clave123'
+			contraseña: 'Clave123',
+			rol: 'cliente'
 		});
 	});
 
-	it('muestra el error del backend (correo ya registrado)', async () => {
-		post.mockRejectedValue(new ApiError(400, 'El correo ya está registrado'));
+	it('permite registrarse como comercio', async () => {
+		post.mockResolvedValue({});
+		render(Register);
+		await escribir(/Nombre/, 'Mi Local');
+		await escribir(/Correo/, 'local@test.com');
+		await escribir(/^Contraseña/, 'Clave123');
+		await escribir(/Confirmar clave/, 'Clave123');
+		await userEvent.selectOptions(screen.getByLabelText(/Rol/), 'comercio');
+		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/auth/login'));
+		expect(post).toHaveBeenCalledWith('/auth/register', {
+			nombre: 'Mi Local',
+			email: 'local@test.com',
+			contraseña: 'Clave123',
+			rol: 'comercio'
+		});
+	});
+
+	it('valida email duplicado contra /auth/existe', async () => {
+		get.mockResolvedValueOnce({ existe: true });
 		render(Register);
 		await escribir(/Nombre/, 'Ana');
 		await escribir(/Correo/, 'ana@test.com');
-		await escribir(/Contraseña/, 'clave123');
+		await escribir(/^Contraseña/, 'Clave123');
+		await escribir(/Confirmar clave/, 'Clave123');
 		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
-		expect(await screen.findByText('El correo ya está registrado')).toBeInTheDocument();
+		expect(await screen.findByText(/ya existe/)).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+		expect(goto).not.toHaveBeenCalled();
+	});
+
+	it('muestra el error del backend (correo ya registrado)', async () => {
+		post.mockRejectedValue(new ApiError(409, 'Este correo ya existe'));
+		render(Register);
+		await escribir(/Nombre/, 'Ana');
+		await escribir(/Correo/, 'ana@test.com');
+		await escribir(/^Contraseña/, 'Clave123');
+		await escribir(/Confirmar clave/, 'Clave123');
+		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
+		expect(await screen.findByText(/ya existe/)).toBeInTheDocument();
 		expect(goto).not.toHaveBeenCalled();
 	});
 });

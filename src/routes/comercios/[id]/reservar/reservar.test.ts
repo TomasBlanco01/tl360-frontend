@@ -16,7 +16,7 @@ vi.mock('$lib/api', async (original) => {
 const get = api.get as ReturnType<typeof vi.fn>;
 const post = api.post as ReturnType<typeof vi.fn>;
 
-const MARTES = '2026-10-13'; // 2026-10-12 es lunes
+const MARTES = '2026-10-20'; // martes futuro (evita el filtro "hoy" de slotsDelDia)
 const DOMINGO = '2026-10-18';
 
 interface Config {
@@ -162,8 +162,14 @@ describe('reservar turno', () => {
 
 		expect(await screen.findByText('Turno ya ocupado')).toBeInTheDocument();
 		expect(screen.queryByText('¡Turno reservado!')).not.toBeInTheDocument();
-		await userEvent.click(screen.getByRole('button', { name: 'Elegir otro horario' }));
-		expect(screen.queryByText('Vas a reservar:')).not.toBeInTheDocument();
+		// Sin botón "Elegir otro horario": la confirmación queda apilada y se elige otro slot directo.
+		expect(
+			screen.queryByRole('button', { name: 'Elegir otro horario' })
+		).not.toBeInTheDocument();
+		expect(screen.getByText('Vas a reservar:')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Confirmar reserva' })).toBeInTheDocument();
+		await userEvent.click(screen.getByRole('button', { name: '09:30' }));
+		expect(screen.getByText(/09:30 hs/)).toBeInTheDocument();
 	});
 
 	it('muestra el motivo si el backend rechaza el horario', async () => {
@@ -197,7 +203,7 @@ describe('reservar turno', () => {
 		await elegirFecha(MARTES);
 		await userEvent.click(await screen.findByRole('button', { name: '09:00' }));
 		expect(await screen.findByText('Vas a reservar:')).toBeInTheDocument();
-		await elegirFecha('2026-10-20');
+		await elegirFecha('2026-10-27');
 		await vi.waitFor(() =>
 			expect(screen.getByRole('button', { name: '09:00' }).className).not.toContain('bg-brand-500')
 		);

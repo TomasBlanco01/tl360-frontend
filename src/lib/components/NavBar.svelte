@@ -5,7 +5,9 @@
 	import { toast } from '$lib/_auditoria/toast.svelte';
 	import ThemePicker from '$lib/components/ThemePicker.svelte';
 	import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import Menu from '@lucide/svelte/icons/menu';
+	import LogOut from '@lucide/svelte/icons/log-out';
 
 	let drawerOpen = $state(false);
 	let confirmarSalida = $state(false);
@@ -34,7 +36,7 @@
 			favoritos.sync();
 			drawerOpen = false;
 			confirmarSalida = false;
-			toast.exito('Sesión cerrada correctamente.');
+			toast.exito('Sesión cerrada');
 			goto('/auth/login');
 		} finally {
 			saliendo = false;
@@ -68,17 +70,15 @@
 
 			{#if auth.user}
 				<button
-					class="ml-2 rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+					class="ml-2 inline-flex items-center gap-2 rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
 					onclick={pedirSalir}
+					aria-label="Cerrar sesión"
 				>
+					<LogOut class="h-4 w-4" />
 					Salir ({auth.user.nombre})
 				</button>
 			{:else}
-				<a
-					href="/auth/login"
-					class="ml-2 rounded-full px-4 py-2 text-sm font-medium text-gray-600 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-brand-400"
-					>Ingresar</a
-				>
+				<Button href="/auth/login" variant="outline" class="ml-2">Ingresar</Button>
 				<a
 					href="/auth/register"
 					class="rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600"
@@ -123,9 +123,11 @@
 				{#if auth.user}
 					<li>
 						<button
-							class="block w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+							class="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
 							onclick={pedirSalir}
+							aria-label="Cerrar sesión"
 						>
+							<LogOut class="h-4 w-4" />
 							Salir ({auth.user.nombre})
 						</button>
 					</li>

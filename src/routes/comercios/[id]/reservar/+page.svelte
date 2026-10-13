@@ -165,11 +165,10 @@
 					<p class="mt-3 text-sm text-danger-600">{error}</p>
 				{/if}
 
-				<div class="mt-4 flex gap-3">
+				<div class="mt-4 flex flex-col gap-3">
 					<Button size="lg" disabled={reservando} onclick={confirmar}>
 						{reservando ? 'Reservando...' : 'Confirmar reserva'}
 					</Button>
-					<Button variant="ghost" onclick={() => (paso = 'fecha')}>Elegir otro horario</Button>
 				</div>
 			</Card>
 		{/if}

@@ -46,6 +46,11 @@ let nextEmpresaId = empresas.length + 1;
 let nextTurnoId = 1;
 let nextUsuarioId = 1000;
 
+// Correos conocidos (seed + registrados en esta sesión) para validar duplicados.
+const emailsRegistrados = new Set<string>(
+	Object.values(usuariosSeed).map((u) => String(u.email).toLowerCase())
+);
+
 function json(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data), {
 		status,
@@ -396,19 +401,43 @@ export async function mockFetch(path: string, options: RequestInit = {}): Promis
 	}
 
 	// ---------- Auth ----------
+	if (method === 'GET' && pathname === '/auth/existe') {
+		const email = String(params.get('email') ?? '').trim().toLowerCase();
+		return json({ existe: email !== '' && emailsRegistrados.has(email) });
+	}
 	if (method === 'POST' && pathname === '/auth/login') {
 		const usuario =
 			Object.values(usuariosSeed).find((u) => u.email === body.email) ?? usuariosSeed.cliente;
 		return json({ message: 'Inicio de sesión exitoso', token: 'mock-token', user: usuario });
 	}
 	if (method === 'POST' && pathname === '/auth/register') {
+		const emailNorm = String(body.email ?? '').trim().toLowerCase();
+		if (emailNorm && emailsRegistrados.has(emailNorm)) {
+			return errorJson(409, 'Este correo ya existe');
+		}
+		const rol = body.rol === 'comercio' ? 'comercio' : 'cliente';
 		const nuevo = {
 			id: nextUsuarioId++,
 			nombre: body.nombre,
 			email: body.email,
-			rol: 'cliente' as const
+			rol
 		};
+		if (emailNorm) emailsRegistrados.add(emailNorm);
 		return json({ message: 'Registro exitoso', token: 'mock-token', user: nuevo }, 201);
+	}
+	if (method === 'PUT' && pathname === '/usuarios/yo') {
+		if (body.email !== undefined) {
+			const emailNorm = String(body.email ?? '').trim().toLowerCase();
+			// No se bloquea el propio correo; solo se registra para futuros duplicados.
+			if (emailNorm) emailsRegistrados.add(emailNorm);
+		}
+		return json({
+			id: body.id ?? 1,
+			nombre: body.nombre ?? 'Usuario',
+			email: body.email ?? 'usuario@test.com',
+			rol: body.rol ?? 'cliente',
+			...body
+		});
 	}
 	if (method === 'POST' && pathname === '/auth/forgot-password') {
 		return json({
