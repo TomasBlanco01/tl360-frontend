@@ -153,14 +153,12 @@ describe('reportar un comercio', () => {
 	it('no se ofrece sin sesión ni al dueño', async () => {
 		auth.logout();
 		await cargar();
-		expect(
-			screen.queryByRole('button', { name: 'Reportar este comercio' })
-		).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Reportar' })).not.toBeInTheDocument();
 	});
 
 	it('abre el formulario, envía el motivo y confirma', async () => {
 		await cargar();
-		await userEvent.click(screen.getByRole('button', { name: 'Reportar este comercio' }));
+		await userEvent.click(screen.getByRole('button', { name: 'Reportar' }));
 		await userEvent.type(screen.getByLabelText('Motivo del reporte'), 'Los datos son falsos');
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar reporte' }));
 		await waitFor(() =>
@@ -170,15 +168,30 @@ describe('reportar un comercio', () => {
 		expect(screen.queryByLabelText('Motivo del reporte')).not.toBeInTheDocument();
 	});
 
+	it('exige el motivo antes de enviar (RF-16)', async () => {
+		await cargar();
+		await userEvent.click(screen.getByRole('button', { name: 'Reportar' }));
+		expect(screen.getByLabelText('Motivo del reporte')).toBeRequired();
+		await userEvent.click(screen.getByRole('button', { name: 'Enviar reporte' }));
+		expect(await screen.findByText(/motivo del reporte/i)).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+	});
+
 	it('si ya lo había reportado muestra el aviso del backend (409)', async () => {
 		post.mockRejectedValue(
 			new ApiError(409, 'Ya reportaste este comercio y el reporte está en revisión')
 		);
 		await cargar();
-		await userEvent.click(screen.getByRole('button', { name: 'Reportar este comercio' }));
+		await userEvent.click(screen.getByRole('button', { name: 'Reportar' }));
 		await userEvent.type(screen.getByLabelText('Motivo del reporte'), 'Sigue mal');
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar reporte' }));
 		expect(await screen.findByText(/Ya reportaste este comercio/)).toBeInTheDocument();
+	});
+
+	it('el botón Reportar usa estilo de alerta rojo (no gris tenue)', async () => {
+		await cargar();
+		const btn = screen.getByRole('button', { name: 'Reportar' });
+		expect(btn.className).not.toContain('text-gray-400');
 	});
 });
 

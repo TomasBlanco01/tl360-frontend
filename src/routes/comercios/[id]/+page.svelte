@@ -115,8 +115,14 @@
 		if (!empresa) return;
 		mensajeReporte = '';
 		errorReporte = false;
+		if (!motivoReporte.trim()) {
+			errorReporte = true;
+			mensajeReporte = 'Contanos el motivo del reporte antes de enviarlo.';
+			toast.error(mensajeReporte);
+			return;
+		}
 		try {
-			await api.post(`/empresas/${empresa.id}/reportes`, { motivo: motivoReporte });
+			await api.post(`/empresas/${empresa.id}/reportes`, { motivo: motivoReporte.trim() });
 			mensajeReporte = 'Reporte enviado. Gracias por avisarnos.';
 			motivoReporte = '';
 			reportando = false;
@@ -209,6 +215,16 @@
 	<title>{empresa?.nombre ?? 'Comercio'} — TL360</title>
 </svelte:head>
 
+{#if cargando || empresa}
+	<div class="mx-auto max-w-3xl px-4 pt-6">
+		<a
+			href="/comercios"
+			class="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+		>
+			← Volver al directorio
+		</a>
+	</div>
+{/if}
 {#if cargando}
 	<p class="mx-auto max-w-3xl px-4 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
 		Cargando comercio...
@@ -567,12 +583,9 @@
 				class="mt-5 flex flex-wrap items-center gap-4 border-t border-gray-100 pt-4 dark:border-gray-800"
 			>
 				{#if auth.user && !esDueno}
-					<button
-						class="text-xs text-gray-400 hover:underline dark:text-gray-500"
-						onclick={() => (reportando = !reportando)}
-					>
-						Reportar este comercio
-					</button>
+					<Button variant="danger" size="sm" onclick={() => (reportando = !reportando)}>
+						Reportar
+					</Button>
 				{/if}
 				{#if auth.isSuperAdmin}
 					<button
@@ -597,6 +610,7 @@
 						bind:value={motivoReporte}
 						rows="2"
 						maxlength="500"
+						required
 						placeholder="¿Qué problema tiene esta ficha? (datos falsos, cerrado, contenido ofensivo…)"
 						aria-label="Motivo del reporte"
 						class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"

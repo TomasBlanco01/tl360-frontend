@@ -40,13 +40,15 @@ interface Backend {
 	horarios?: Record<string, string[]>;
 	telefonos?: unknown[];
 	turnos?: unknown;
+	calificaciones?: unknown;
 }
 
 function backend({
 	comercio = propia,
 	horarios = { Lunes: ['09:00-12:00'] },
 	telefonos = [{ id: 1, numero: '2392411234', etiqueta: 'Emanuel' }],
-	turnos = []
+	turnos = [],
+	calificaciones = []
 }: Backend = {}) {
 	get.mockImplementation(async (url: string) => {
 		if (url.startsWith('/empresas?admin_id=')) return comercio ? [comercio] : [];
@@ -60,6 +62,10 @@ function backend({
 		if (url === '/empresas/2700/turnos') {
 			if (turnos instanceof Error) throw turnos;
 			return turnos;
+		}
+		if (url === '/empresas/2700/calificaciones') {
+			if (calificaciones instanceof Error) throw calificaciones;
+			return calificaciones;
 		}
 		return [];
 	});
@@ -402,13 +408,16 @@ describe('Publicidades', () => {
 			empresa_id: 2700,
 			titulo: '2x1',
 			descripcion: 'Este mes',
-			imagen_url: ''
+			imagen_url: 'https://x.com/banner.jpg'
 		});
 		render(Negocio);
 		await abrirPestania('Publicidades');
 		const titulo = await screen.findByLabelText('Título');
-		await userEvent.type(titulo, '2x1');
-		await userEvent.type(screen.getByLabelText('Descripción'), 'Este mes');
+		fireEvent.input(titulo, { target: { value: '2x1' } });
+		fireEvent.input(screen.getByLabelText('Descripción'), { target: { value: 'Este mes' } });
+		fireEvent.input(screen.getByLabelText('URL de imagen'), {
+			target: { value: 'https://x.com/banner.jpg' }
+		});
 		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
 
 		await vi.waitFor(() =>
@@ -416,18 +425,36 @@ describe('Publicidades', () => {
 				empresa_id: 2700,
 				titulo: '2x1',
 				descripcion: 'Este mes',
-				imagen_url: ''
+				imagen_url: 'https://x.com/banner.jpg'
 			})
 		);
 		expect((titulo as HTMLInputElement).value).toBe('');
-	});
+	}, 10000);
 
 	it('no publica sin título', async () => {
 		render(Negocio);
 		await abrirPestania('Publicidades');
+		fireEvent.input(await screen.findByLabelText('URL de imagen'), {
+			target: { value: 'https://x.com/a.jpg' }
+		});
 		await userEvent.click(await screen.findByRole('button', { name: 'Publicar' }));
+		expect(await screen.findByText('El título es obligatorio.')).toBeInTheDocument();
 		expect(post).not.toHaveBeenCalled();
-	});
+	}, 10000);
+
+	it('exige imagen_url válida además del título', async () => {
+		render(Negocio);
+		await abrirPestania('Publicidades');
+		fireEvent.input(await screen.findByLabelText('Título'), { target: { value: '2x1' } });
+		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
+		expect(await screen.findByText(/La imagen es obligatoria/)).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+
+		fireEvent.input(screen.getByLabelText('URL de imagen'), { target: { value: 'no-es-url' } });
+		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
+		expect(await screen.findByText(/La imagen es obligatoria/)).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+	}, 10000);
 });
 
 describe('vista inicial y verificación', () => {
@@ -444,5 +471,101 @@ describe('vista inicial y verificación', () => {
 		expect(screen.getByLabelText(/¿Cómo te contactan/)).toBeInTheDocument();
 		expect(screen.getByLabelText(/CUIT \(11 dígitos\)/)).toBeInTheDocument();
 		expect(screen.getByText(/Ubicación en el mapa/)).toBeInTheDocument();
+	});
+});
+
+describe('validaciones de ficha (redes y filas vacías)', () => {
+	it('rechaza una red social que no sea URL http(s) válida', async () => {
+		render(Negocio);
+		await abrirFicha();
+		await userEvent.click(screen.getByRole('button', { name: 'Instagram' }));
+		const input = screen.getByPlaceholderText('https://instagram.com/tu_comercio');
+		fireEvent.input(input, { target: { value: 'no-es-url' } });
+		await userEvent.click(screen.getByRole('button', { name: /^Guardar$/ }));
+		await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+		expect(await screen.findByText(/Pegá una URL válida/)).toBeInTheDocument();
+		expect(put).not.toHaveBeenCalled();
+	}, 10000);
+
+	it('exige completar o quitar la fila de foto vacía antes de guardar', async () => {
+		render(Negocio);
+		await abrirFicha();
+		await userEvent.click(screen.getByRole('button', { name: '+ agregar foto' }));
+		await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+		expect(await screen.findByText(/fila de foto vacía/)).toBeInTheDocument();
+		expect(put).not.toHaveBeenCalled();
+	}, 10000);
+
+	it('exige completar o quitar la fila de teléfono vacía antes de guardar', async () => {
+		render(Negocio);
+		await abrirFicha();
+		await userEvent.click(
+			screen.getByRole('button', { name: '+ Agregar otro teléfono de contacto' })
+		);
+		await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+		expect(await screen.findByText(/fila de teléfono vacía/)).toBeInTheDocument();
+		expect(put).not.toHaveBeenCalled();
+	}, 10000);
+});
+
+describe('filtro de turnos por día', () => {
+	const agenda = [
+		{ id: 1, fecha: '2026-10-13', hora: '09:00:00', estado: 'confirmado', cliente_nombre: 'Ana' },
+		{ id: 2, fecha: '2026-10-14', hora: '10:00:00', estado: 'confirmado', cliente_nombre: 'Beto' }
+	];
+
+	it('muestra todos sin filtro y filtra por fecha exacta', async () => {
+		backend({ turnos: agenda });
+		render(Negocio);
+		expect(await screen.findByText('Ana')).toBeInTheDocument();
+		expect(screen.getByText('Beto')).toBeInTheDocument();
+		const filtro = screen.getByLabelText('Filtrar por día');
+		expect(filtro).toHaveAttribute('type', 'date');
+		fireEvent.input(filtro, { target: { value: '2026-10-14' } });
+		await vi.waitFor(() => expect(screen.queryByText('Ana')).not.toBeInTheDocument());
+		expect(screen.getByText('Beto')).toBeInTheDocument();
+		fireEvent.input(filtro, { target: { value: '' } });
+		expect(await screen.findByText('Ana')).toBeInTheDocument();
+		expect(screen.getByText('Beto')).toBeInTheDocument();
+	});
+
+	it('avisa cuando ningún turno coincide con el día', async () => {
+		backend({ turnos: agenda });
+		render(Negocio);
+		await screen.findByText('Ana');
+		fireEvent.input(screen.getByLabelText('Filtrar por día'), {
+			target: { value: '2026-10-20' }
+		});
+		expect(await screen.findByText('No hay turnos para ese día')).toBeInTheDocument();
+	});
+});
+
+describe('calificaciones del comercio (RF-13)', () => {
+	const opiniones = [
+		{ usuario_nombre: 'Martina', puntaje: 5, comentario: 'Excelente', creado_en: '2026-09-01' },
+		{ usuario_nombre: 'Lucas', puntaje: 3, comentario: null, creado_en: '2026-09-02' }
+	];
+
+	it('lista las opiniones con promedio y pide el endpoint del comercio', async () => {
+		backend({ calificaciones: opiniones });
+		render(Negocio);
+		await abrirPestania('Calificaciones');
+		expect(await screen.findByText('Martina')).toBeInTheDocument();
+		expect(screen.getByText('Excelente')).toBeInTheDocument();
+		expect(screen.getByText('Lucas')).toBeInTheDocument();
+		expect(screen.getByText(/Promedio 4\.0/)).toBeInTheDocument();
+		expect(get).toHaveBeenCalledWith('/empresas/2700/calificaciones');
+	});
+
+	it('filtra por puntaje con el select', async () => {
+		backend({ calificaciones: opiniones });
+		render(Negocio);
+		await abrirPestania('Calificaciones');
+		await screen.findByText('Martina');
+		await userEvent.selectOptions(screen.getByLabelText('Filtrar por puntaje'), '5');
+		expect(screen.getByText('Martina')).toBeInTheDocument();
+		expect(screen.queryByText('Lucas')).not.toBeInTheDocument();
+		await userEvent.selectOptions(screen.getByLabelText('Filtrar por puntaje'), 'todas');
+		expect(screen.getByText('Lucas')).toBeInTheDocument();
 	});
 });

@@ -8,6 +8,7 @@
 		Categoria,
 		Empresa,
 		HorariosPorDia,
+		Resena,
 		TelefonoEmpresa,
 		TurnoRecibido
 	} from '$lib/types';
@@ -29,6 +30,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import FormField from '$lib/components/FormField.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import RatingStars from '$lib/components/ui/RatingStars.svelte';
 	import MapaComercios from '$lib/components/MapaComercios.svelte';
 	import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 	import Check from '@lucide/svelte/icons/check';
@@ -165,6 +167,17 @@
 			});
 	}
 
+	function esUrlHttpValida(valor: string): boolean {
+		const v = valor.trim();
+		if (!v) return false;
+		try {
+			const u = new URL(v);
+			return u.protocol === 'http:' || u.protocol === 'https:';
+		} catch {
+			return false;
+		}
+	}
+
 	async function guardarFicha() {
 		mensaje = '';
 		// 1.2 Validación dura: solo dígitos en teléfonos.
@@ -186,7 +199,28 @@
 				formErrors = { ...formErrors, [`tel_${i}`]: 'Usá solo números, sin espacios ni guiones' };
 			}
 		});
+		// Validar redes sociales: si hay valor, debe ser URL http(s) válida.
+		for (const red of ['instagram', 'facebook'] as const) {
+			const v = form[red].trim();
+			if (v && !esUrlHttpValida(v)) {
+				formErrors = {
+					...formErrors,
+					[red]: 'Pegá una URL válida que empiece con http(s)://'
+				};
+			}
+		}
 		if (Object.keys(formErrors).length > 0) return;
+		// No permitir filas vacías de fotos/teléfonos: completar o quitar antes de guardar.
+		if (telefonos.some((t) => !t.numero.trim())) {
+			mensaje = 'Completá o quitá la fila de teléfono vacía antes de guardar.';
+			toast.error(mensaje);
+			return;
+		}
+		if (fotos.some((f) => !f.trim())) {
+			mensaje = 'Completá o quitá la fila de foto vacía antes de guardar.';
+			toast.error(mensaje);
+			return;
+		}
 
 		const payload = {
 			...form,
@@ -380,13 +414,67 @@
 
 	// ---------- Publicidades ----------
 	let nuevaPublicidad = $state({ titulo: '', descripcion: '', imagen_url: '' });
+	let mensajePublicidad = $state('');
 
 	function agregarPublicidad() {
-		if (!miEmpresa || !nuevaPublicidad.titulo.trim()) return;
+		if (!miEmpresa) return;
+		mensajePublicidad = '';
+		if (!nuevaPublicidad.titulo.trim()) {
+			mensajePublicidad = 'El título es obligatorio.';
+			toast.error(mensajePublicidad);
+			return;
+		}
+		if (!esUrlHttpValida(nuevaPublicidad.imagen_url)) {
+			mensajePublicidad = 'La imagen es obligatoria: pegá una URL válida http(s)://.';
+			toast.error(mensajePublicidad);
+			return;
+		}
 		publicidades.crear({ empresa_id: miEmpresa.id, ...nuevaPublicidad });
 		toast.exito('Publicidad publicada.');
 		nuevaPublicidad = { titulo: '', descripcion: '', imagen_url: '' };
 	}
+
+	// ---------- Turnos recibidos: filtro por día ----------
+	let filtroDia = $state('');
+	const turnosFiltrados = $derived(
+		(turnosRecibidos ?? []).filter((t) => !filtroDia || t.fecha === filtroDia)
+	);
+
+	// ---------- Calificaciones del comercio (RF-13, dueño) ----------
+	let calificaciones = $state<Resena[] | null>(null);
+	let errorCalificaciones = $state('');
+	let filtroPuntaje = $state('todas');
+
+	function recargarCalificaciones() {
+		if (!miEmpresa) return;
+		calificaciones = null;
+		errorCalificaciones = '';
+		api
+			.get<Resena[]>(`/empresas/${miEmpresa.id}/calificaciones`)
+			.then((res) => (calificaciones = res))
+			.catch((err) => {
+				console.error(err);
+				errorCalificaciones =
+					err instanceof ApiError ? err.message : 'No se pudieron cargar las calificaciones.';
+				calificaciones = [];
+			});
+	}
+
+	$effect(() => {
+		if (tab !== 'calificaciones' || !miEmpresa || calificaciones !== null) return;
+		recargarCalificaciones();
+	});
+
+	const calificacionesFiltradas = $derived(
+		(calificaciones ?? []).filter(
+			(c) => filtroPuntaje === 'todas' || c.puntaje === Number(filtroPuntaje)
+		)
+	);
+	const promedioCalificaciones = $derived(
+		calificaciones && calificaciones.length > 0
+			? calificaciones.reduce((acc, c) => acc + c.puntaje, 0) / calificaciones.length
+			: 0
+	);
 </script>
 
 <div class="mx-auto max-w-4xl px-4 py-8">
@@ -400,6 +488,7 @@
 			{ id: 'ficha', label: 'Mi Ficha' },
 			{ id: 'horarios', label: 'Horarios' },
 			{ id: 'turnos', label: 'Turnos recibidos' },
+			{ id: 'calificaciones', label: 'Calificaciones' },
 			{ id: 'publicidades', label: 'Publicidades' }
 		]}
 		bind:active={tab}
@@ -626,6 +715,9 @@
 												bind:value={form[red.id]}
 												class="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
 											/>
+											{#if formErrors[red.id]}
+												<p class="mt-1 text-xs text-danger-600">{formErrors[red.id]}</p>
+											{/if}
 											<div class="mt-2 flex justify-between">
 												<button
 													type="button"
@@ -650,6 +742,12 @@
 								</div>
 							{/each}
 						</div>
+						{#if formErrors.instagram}
+							<p class="mt-1 text-xs text-danger-600">{formErrors.instagram}</p>
+						{/if}
+						{#if formErrors.facebook}
+							<p class="mt-1 text-xs text-danger-600">{formErrors.facebook}</p>
+						{/if}
 					</div>
 				</div>
 
@@ -863,29 +961,122 @@
 					description="Cuando un cliente reserve, va a aparecer acá."
 				/>
 			{:else}
-				<div class="flex flex-col gap-3">
-					{#each turnosRecibidos as turno (turno.id)}
-						<Card class="flex items-center justify-between gap-3 p-4">
-							<div>
-								<p class="font-semibold text-gray-800 dark:text-gray-100">{turno.cliente_nombre}</p>
-								<p class="text-sm text-gray-500 dark:text-gray-400">
-									{formatearFecha(turno.fecha)}
-								</p>
-							</div>
-							<div class="flex items-center gap-3">
-								<p class="text-lg font-bold text-brand-700 dark:text-brand-400">
-									{turno.hora.slice(0, 5)} hs
-								</p>
-								<button
-									class="text-xs font-medium text-danger-600 hover:underline"
-									onclick={() => (turnoACancelar = turno)}
-								>
-									Cancelar
-								</button>
-							</div>
-						</Card>
-					{/each}
+				<div class="mb-3 flex flex-wrap items-center gap-2">
+					<label
+						for="filtro-dia"
+						class="text-sm font-medium text-gray-700 dark:text-gray-200"
+					>
+						Filtrar por día
+					</label>
+					<input
+						id="filtro-dia"
+						type="date"
+						bind:value={filtroDia}
+						aria-label="Filtrar por día"
+						class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+					/>
+					{#if filtroDia}
+						<button
+							type="button"
+							class="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+							onclick={() => (filtroDia = '')}
+						>
+							Limpiar filtro
+						</button>
+					{/if}
 				</div>
+				{#if turnosFiltrados.length === 0}
+					<EmptyState
+						title="No hay turnos para ese día"
+						description="Probá con otra fecha o limpiá el filtro para ver toda la agenda."
+					/>
+				{:else}
+					<div class="flex flex-col gap-3">
+						{#each turnosFiltrados as turno (turno.id)}
+							<Card class="flex items-center justify-between gap-3 p-4">
+								<div>
+									<p class="font-semibold text-gray-800 dark:text-gray-100">{turno.cliente_nombre}</p>
+									<p class="text-sm text-gray-500 dark:text-gray-400">
+										{formatearFecha(turno.fecha)}
+									</p>
+								</div>
+								<div class="flex items-center gap-3">
+									<p class="text-lg font-bold text-brand-700 dark:text-brand-400">
+										{turno.hora.slice(0, 5)} hs
+									</p>
+									<button
+										class="text-xs font-medium text-danger-600 hover:underline"
+										onclick={() => (turnoACancelar = turno)}
+									>
+										Cancelar
+									</button>
+								</div>
+							</Card>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+		{:else if tab === 'calificaciones'}
+			{#if !miEmpresa}
+				<EmptyState
+					title="Primero cargá tu ficha"
+					description="Necesitás crear tu comercio en la pestaña Mi Ficha."
+				/>
+			{:else if errorCalificaciones}
+				<EmptyState title="No se pudieron cargar las calificaciones" description={errorCalificaciones} />
+			{:else if calificaciones === null}
+				<p class="text-sm text-gray-400 dark:text-gray-500">Cargando calificaciones...</p>
+			{:else if calificaciones.length === 0}
+				<EmptyState
+					title="Todavía no tenés calificaciones"
+					description="Cuando un cliente califique tu comercio, va a aparecer acá."
+				/>
+			{:else}
+				<Card class="mb-3 flex flex-wrap items-center gap-3 p-4">
+					<div class="flex items-center gap-2">
+						<RatingStars value={promedioCalificaciones} count={calificaciones.length} />
+						<span class="text-sm text-gray-500 dark:text-gray-400">
+							Promedio {promedioCalificaciones.toFixed(1)}
+						</span>
+					</div>
+					<label class="ml-auto flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+						Filtrar por puntaje
+						<select
+							bind:value={filtroPuntaje}
+							aria-label="Filtrar por puntaje"
+							class="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-800 outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+						>
+							<option value="todas">Todas</option>
+							<option value="5">5 estrellas</option>
+							<option value="4">4 estrellas</option>
+							<option value="3">3 estrellas</option>
+							<option value="2">2 estrellas</option>
+							<option value="1">1 estrella</option>
+						</select>
+					</label>
+				</Card>
+				{#if calificacionesFiltradas.length === 0}
+					<EmptyState
+						title="Sin calificaciones con ese puntaje"
+						description="Probá con otro filtro."
+					/>
+				{:else}
+					<div class="flex flex-col gap-3">
+						{#each calificacionesFiltradas as c, i (i)}
+							<Card class="p-4">
+								<div class="flex items-center gap-2">
+									<span class="font-semibold text-gray-700 dark:text-gray-200"
+										>{c.usuario_nombre}</span
+									>
+									<RatingStars value={c.puntaje} />
+								</div>
+								{#if c.comentario}
+									<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{c.comentario}</p>
+								{/if}
+							</Card>
+						{/each}
+					</div>
+				{/if}
 			{/if}
 		{:else if tab === 'publicidades'}
 			{#if !miEmpresa}
@@ -903,6 +1094,9 @@
 						<FormField label="Descripción" bind:value={nuevaPublicidad.descripcion} />
 						<FormField label="URL de imagen" bind:value={nuevaPublicidad.imagen_url} />
 					</div>
+					{#if mensajePublicidad}
+						<p class="mt-2 text-sm text-danger-600">{mensajePublicidad}</p>
+					{/if}
 					<Button class="mt-4" onclick={agregarPublicidad}>Publicar</Button>
 				</Card>
 
