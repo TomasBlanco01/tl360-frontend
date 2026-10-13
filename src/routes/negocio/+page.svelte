@@ -21,7 +21,6 @@
 		cuit
 	} from '$lib/validation';
 	import { cacheHorarios } from '$lib/horarios-cache';
-	import { track } from '$lib/obs';
 	import { DIAS_ORDEN } from '$lib/turnos';
 	import { separarTelefono } from '$lib/contacto';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
@@ -265,7 +264,6 @@
 				constancia_cuit_url: constanciaUrl.trim() || undefined
 			};
 			toast.exito('Solicitud de verificación enviada. Te avisaremos cuando se revise.');
-			track('solicitar_verificacion', { empresa: miEmpresa.id });
 		} catch (err) {
 			toast.error(err instanceof ApiError ? err.message : 'No se pudo enviar la solicitud.');
 		} finally {

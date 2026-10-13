@@ -11,7 +11,7 @@ describe('redirect /mapa → /comercios?vista=mapa', () => {
 	it('redirige 308 conservando q y traduciendo categoria_id → categoria', () => {
 		let destino = '';
 		try {
-			load({ url: url('/mapa?q=cafe&categoria_id=2&etiquetas=rampa') } as never, {} as never);
+			load({ url: url('/mapa?q=cafe&categoria_id=2&etiquetas=rampa') } as never);
 		} catch (e) {
 			// SvelteKit representa el redirect como objeto con location/status.
 			destino = (e as { location: string }).location ?? String(e);
@@ -26,7 +26,7 @@ describe('redirect /mapa → /comercios?vista=mapa', () => {
 	it('sin filtros redirige solo con vista=mapa', () => {
 		let destino = '';
 		try {
-			load({ url: url('/mapa') } as never, {} as never);
+			load({ url: url('/mapa') } as never);
 		} catch (e) {
 			destino = (e as { location: string }).location ?? String(e);
 		}

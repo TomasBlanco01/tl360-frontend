@@ -27,7 +27,6 @@
 		page.url.searchParams.get('vista') === 'mapa' ? 'mapa' : 'lista'
 	);
 	let pedido = 0;
-	let controlCarga: AbortController | null = null;
 
 	// Sincronizar estado si el usuario navega con atrás/adelante.
 	$effect(() => {
@@ -61,20 +60,13 @@
 		if (tags.length > 0) params.set('etiquetas', tags.join(','));
 		params.set('limit', String(POR_PAGINA + 1));
 		params.set('offset', String(reiniciar ? 0 : empresas.length));
-		const controlador = new AbortController();
-		controlCarga?.abort();
-		controlCarga = controlador;
 		try {
-			const res = await api.get<Empresa[]>(`/empresas?${params}`, {
-				signal: controlador.signal,
-				reintentos: 0
-			});
+			const res = await api.get<Empresa[]>(`/empresas?${params}`);
 			if (miPedido !== pedido) return; // llegó una búsqueda más nueva
 			hayMas = res.length > POR_PAGINA;
 			const pagina = res.slice(0, POR_PAGINA);
 			empresas = reiniciar ? pagina : [...empresas, ...pagina];
 		} catch (err) {
-			if (err instanceof Error && err.name === 'AbortError') return;
 			console.error(err);
 			if (reiniciar) error = 'No pudimos cargar los comercios. Revisá tu conexión.';
 		} finally {

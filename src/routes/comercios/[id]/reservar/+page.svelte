@@ -6,7 +6,6 @@
 	import { slotsDelDia } from '$lib/turnos';
 	import { urlEmpresa } from '$lib/slug';
 	import { exigirAcceso } from '$lib/auth/guard';
-	import { reportarError, track } from '$lib/obs';
 	import { toast } from '$lib/_auditoria/toast.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -79,10 +78,8 @@
 			});
 			paso = 'exito';
 			toast.exito('Turno reservado correctamente.');
-			track('reservar_turno', { empresa: empresa.id });
 		} catch (err) {
 			console.error(err);
-			reportarError(err, { donde: 'reservar', empresa: empresa.id });
 			// 1.5 Si otro cliente ganó la carrera por el slot (409), avisar y refrescar la grilla
 			// manteniendo el paso de confirmación para que pueda elegir otro horario.
 			if (err instanceof ApiError && err.status === 409) {
