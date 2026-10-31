@@ -312,20 +312,74 @@ describe('Mi cuenta', () => {
 	});
 
 	describe('mis datos', () => {
-		it('muestra la sección Mis datos con nombre y correo', async () => {
+		async function abrirMisDatos() {
 			render(Cuenta);
 			await screen.findByText('Peluquería Central');
-			expect(screen.getByRole('heading', { name: 'Mis datos' })).toBeInTheDocument();
+			await userEvent.click(screen.getByRole('button', { name: 'Mis datos' }));
+		}
+
+		it('es una pestaña propia con nombre, correo y cambio de contraseña', async () => {
+			render(Cuenta);
+			await screen.findByText('Peluquería Central');
+			expect(screen.queryByLabelText(/Contraseña actual/)).not.toBeInTheDocument();
+			await userEvent.click(screen.getByRole('button', { name: 'Mis datos' }));
 			expect(screen.getByLabelText(/^Nombre/)).toHaveValue('Ana Pérez');
 			expect(screen.getByLabelText(/Correo/)).toHaveValue('ana@test.com');
 			expect(screen.getByLabelText(/Contraseña actual/)).toBeInTheDocument();
 			expect(screen.getByLabelText(/Nueva contraseña/)).toBeInTheDocument();
 			expect(screen.getByLabelText(/Confirmar nueva/)).toBeInTheDocument();
+			expect(screen.queryByText('Peluquería Central')).not.toBeInTheDocument();
+		});
+
+		it('el dueño de un comercio solo ve Mis datos', async () => {
+			auth.login('tok', { ...ana, rol: 'admin' });
+			render(Cuenta);
+			expect(await screen.findByLabelText(/Contraseña actual/)).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Mis datos' })).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Mis Turnos' })).not.toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Favoritos' })).not.toBeInTheDocument();
+		});
+
+		it('un correo nuevo queda pendiente de verificar y lo avisa', async () => {
+			put.mockResolvedValue({ ...ana, email: 'ana.nueva@test.com', email_verificado: false });
+			await abrirMisDatos();
+			const correo = screen.getByLabelText(/Correo/);
+			await userEvent.clear(correo);
+			await userEvent.type(correo, 'ana.nueva@test.com');
+			await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+			expect(
+				await screen.findByText(/Te enviamos un enlace para verificar tu nuevo correo/)
+			).toBeInTheDocument();
+			expect(auth.user?.email).toBe('ana.nueva@test.com');
+			expect(auth.user?.email_verificado).toBe(false);
+		});
+
+		it('si el backend rechaza el cambio lo muestra y no toca la sesión', async () => {
+			put.mockRejectedValue(new ApiError(409, 'Ya existe una cuenta con ese correo'));
+			await abrirMisDatos();
+			const correo = screen.getByLabelText(/Correo/);
+			await userEvent.clear(correo);
+			await userEvent.type(correo, 'otra@test.com');
+			await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+			expect(await screen.findByText('Ya existe una cuenta con ese correo')).toHaveClass(
+				'text-danger-600'
+			);
+			expect(auth.user?.email).toBe('ana@test.com');
+		});
+
+		it('si la contraseña actual es incorrecta lo informa', async () => {
+			put.mockRejectedValue(new ApiError(400, 'La contraseña actual no es correcta'));
+			await abrirMisDatos();
+			await userEvent.type(screen.getByLabelText(/Contraseña actual/), 'Otra1234');
+			await userEvent.type(screen.getByLabelText(/Nueva contraseña/), 'Nueva1234');
+			await userEvent.type(screen.getByLabelText(/Confirmar nueva/), 'Nueva1234');
+			await userEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
+			expect(await screen.findByText('La contraseña actual no es correcta')).toBeInTheDocument();
 		});
 
 		it('guardar datos llama a /usuarios/yo y actualiza el usuario', async () => {
-			render(Cuenta);
-			await screen.findByText('Peluquería Central');
+			put.mockResolvedValue({ ...ana, nombre: 'Ana Nueva', email_verificado: true });
+			await abrirMisDatos();
 			const campoNombre = screen.getByLabelText(/^Nombre/) as HTMLInputElement;
 			await userEvent.clear(campoNombre);
 			await userEvent.type(campoNombre, 'Ana Nueva');
@@ -341,8 +395,7 @@ describe('Mi cuenta', () => {
 		});
 
 		it('cambiar contraseña avisa si no coinciden', async () => {
-			render(Cuenta);
-			await screen.findByText('Peluquería Central');
+			await abrirMisDatos();
 			await userEvent.type(screen.getByLabelText(/Contraseña actual/), 'Vieja1234');
 			await userEvent.type(screen.getByLabelText(/Nueva contraseña/), 'Nueva1234');
 			await userEvent.type(screen.getByLabelText(/Confirmar nueva/), 'Distinta1234');
@@ -355,8 +408,7 @@ describe('Mi cuenta', () => {
 		});
 
 		it('cambiar contraseña con datos válidos muestra éxito', async () => {
-			render(Cuenta);
-			await screen.findByText('Peluquería Central');
+			await abrirMisDatos();
 			await userEvent.type(screen.getByLabelText(/Contraseña actual/), 'Vieja1234');
 			await userEvent.type(screen.getByLabelText(/Nueva contraseña/), 'Nueva1234');
 			await userEvent.type(screen.getByLabelText(/Confirmar nueva/), 'Nueva1234');
