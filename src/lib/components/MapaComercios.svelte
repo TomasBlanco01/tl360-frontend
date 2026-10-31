@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import 'leaflet/dist/leaflet.css';
 	import type { Map as LeafletMap, LayerGroup, Marker } from 'leaflet';
 	import type { PuntoMapa } from '$lib/types';
 	import { agruparPuntos, escaparHtml } from '$lib/geo';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { favoritos } from '$lib/stores/favoritos.svelte';
 
 	let {
 		puntos,
@@ -16,13 +19,16 @@
 		latitud = null,
 		longitud = null,
 		oncambio,
-		cargandoDatos = false
+		cargandoDatos = false,
+		ruta = null
 	}: {
 		puntos: PuntoMapa[];
 		centro?: [number, number];
 		zoom?: number;
 		/** Posición del usuario (geolocalización), si la concedió. */
 		yo?: [number, number] | null;
+		/** Trazado [lat, lng] devuelto por OSRM (RF-02). */
+		ruta?: [number, number][] | null;
 		alto?: string;
 		onseleccionar?: (id: number) => void;
 		modoSelector?: boolean;
@@ -39,6 +45,30 @@
 	let pinSelector: Marker | undefined;
 	let L: typeof import('leaflet') | undefined;
 	let listo = $state(false);
+
+	// RF-10: el corazón del popup usa el mismo store que la ficha del comercio.
+	function alternarFavoritoDesdeMapa(id: number) {
+		if (!auth.user) {
+			goto('/auth/login');
+			return;
+		}
+		favoritos.toggle(id);
+	}
+
+	function alClickEnMapa(event: MouseEvent) {
+		const target = event.target as HTMLElement | null;
+		const boton = target?.closest<HTMLElement>('[data-favorito-id]');
+		if (!boton) return;
+		const id = Number(boton.dataset.favoritoId);
+		if (Number.isInteger(id)) alternarFavoritoDesdeMapa(id);
+	}
+
+	$effect(() => {
+		if (!browser || !contenedor) return;
+		const el = contenedor;
+		el.addEventListener('click', alClickEnMapa);
+		return () => el.removeEventListener('click', alClickEnMapa);
+	});
 
 	// Leaflet toca `window` al importarse: se carga solo en el navegador (evita "window is not defined" en SSR).
 	$effect(() => {
@@ -93,7 +123,10 @@
 			}
 			const p = g.items[0];
 			const url = `/comercios/${p.slug || p.id}`;
-			const popup = `<div style="min-width:160px"><strong>${escaparHtml(p.nombre)}</strong>${p.verificado ? ' ✓' : ''}<br><a href="${url}">Ver ficha →</a></div>`;
+			const favorito = favoritos.isFavorito(p.id);
+			const corazon = favorito ? '\u2665' : '\u2661';
+			const etiqueta = favorito ? 'Quitar de favoritos' : 'Marcar como favorito';
+			const popup = `<div style="min-width:160px"><strong>${escaparHtml(p.nombre)}</strong>${p.verificado ? ' \u2714' : ''}<br><a href="${url}">Ver ficha</a> <button type="button" data-favorito-id="${p.id}" aria-label="${etiqueta}" style="border:0;background:transparent;cursor:pointer;font-size:1.1rem;line-height:1;color:${favorito ? '#dc2626' : '#9ca3af'}">${corazon}</button></div>`;
 			const m = L!
 				.circleMarker([p.lat, p.lng], {
 					radius: 7,
@@ -111,6 +144,10 @@
 		if (pinSelector) {
 			pinSelector.remove();
 			pinSelector = undefined;
+		}
+		// RF-02: dibujar la ruta debajo de los marcadores.
+		if (ruta && ruta.length > 1) {
+			L.polyline(ruta, { color: '#5e35b1', weight: 5, opacity: 0.85 }).addTo(capa);
 		}
 		marcadores.forEach((m) => capa!.addLayer(m));
 		if (yo) {
@@ -137,6 +174,7 @@
 		const todos: [number, number][] = [
 			...puntos.map((p) => [p.lat, p.lng] as [number, number]),
 			...(yo ? [yo] : []),
+			...(ruta ?? []),
 			...(modoSelector && latitud != null && longitud != null
 				? [[latitud, longitud] as [number, number]]
 				: [])

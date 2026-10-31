@@ -2,12 +2,13 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { api, ApiError } from '$lib/api';
-	import type { Empresa, HorariosPorDia, Resena } from '$lib/types';
+	import type { Empresa, HorariosPorDia, MiTurno, Resena } from '$lib/types';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { favoritos } from '$lib/stores/favoritos.svelte';
 	import { estaAbiertoAhora, agruparHorarios } from '$lib/turnos';
 	import { enlaceLlamada, enlaceWhatsApp, formatearTelefono } from '$lib/contacto';
 	import { urlReservar } from '$lib/slug';
+	import { formatearFechaAR } from '$lib/validation';
 	import { toast } from '$lib/_auditoria/toast.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
@@ -16,6 +17,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import RatingStars from '$lib/components/ui/RatingStars.svelte';
 	import MapaComercios from '$lib/components/MapaComercios.svelte';
+	import RutaAlComercio from '$lib/components/RutaAlComercio.svelte';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import MapPin from '@lucide/svelte/icons/map-pin';
 	import Clock from '@lucide/svelte/icons/clock';
@@ -30,12 +32,16 @@
 	let empresa = $state<Empresa | null>(null);
 	let horarios = $state<HorariosPorDia>({});
 	let cargando = $state(true);
+	let miUbicacion = $state<[number, number] | null>(null);
+	let rutaGeometria = $state<[number, number][] | null>(null);
 
 	const gruposHorario = $derived(agruparHorarios(horarios));
 
 	$effect(() => {
 		const param = slugOId;
 		cargando = true;
+		miUbicacion = null;
+		rutaGeometria = null;
 		api
 			.get<Empresa>(`/empresas/${param}`)
 			.then((e) => {
@@ -65,6 +71,39 @@
 
 	const esDueno = $derived(!!auth.user && empresa?.admin_id === auth.user.id);
 
+	// RF-13: solo se califica un turno propio ya realizado, y una sola vez por turno.
+	let turnosCalificables = $state<MiTurno[]>([]);
+	let turnoCalificar = $state<number | null>(null);
+
+	function yaPasoSuHorario(fecha: string, hora: string): boolean {
+		return new Date(`${fecha}T${hora}`).getTime() < Date.now();
+	}
+
+	$effect(() => {
+		if (!auth.user || !empresa || esDueno) {
+			turnosCalificables = [];
+			turnoCalificar = null;
+			return;
+		}
+		const empresaId = empresa.id;
+		api
+			.get<MiTurno[]>('/turnos/mis-turnos')
+			.then((ts) => {
+				turnosCalificables = ts.filter(
+					(t) =>
+						t.empresa_id === empresaId &&
+						!t.calificado &&
+						(t.estado === 'confirmado' || t.estado === 'completado') &&
+						yaPasoSuHorario(t.fecha, t.hora)
+				);
+				turnoCalificar = turnosCalificables[0]?.id ?? null;
+			})
+			.catch(() => {
+				turnosCalificables = [];
+				turnoCalificar = null;
+			});
+	});
+
 	$effect(() => {
 		const id = empresa?.id ?? empresaId;
 		api
@@ -81,9 +120,16 @@
 			mensajeResena = 'Elegí un puntaje de 1 a 5 estrellas.';
 			return;
 		}
+		if (turnoCalificar == null) {
+			errorResena = true;
+			mensajeResena = 'Elegí el turno que querés calificar.';
+			return;
+		}
+		const turnoUsado = turnoCalificar;
 		enviandoResena = true;
 		try {
 			await api.post(`/empresas/${empresa.id}/calificaciones`, {
+				turno_id: turnoUsado,
 				puntaje,
 				comentario: comentario.trim() || undefined
 			});
@@ -93,6 +139,10 @@
 			]);
 			empresa = e;
 			resenas = r;
+			turnosCalificables = turnosCalificables.filter((t) => t.id !== turnoUsado);
+			turnoCalificar = turnosCalificables[0]?.id ?? null;
+			puntaje = 0;
+			comentario = '';
 			errorResena = false;
 			mensajeResena = '¡Gracias por tu calificación!';
 			toast.exito('¡Gracias por tu calificación!');
@@ -492,7 +542,17 @@
 						puntos={[
 							{ id: empresa.id, nombre: empresa.nombre, lat: empresa.lat, lng: empresa.lng }
 						]}
+						yo={miUbicacion}
+						ruta={rutaGeometria}
 						alto="h-56"
+					/>
+					<RutaAlComercio
+						destino={[empresa.lat, empresa.lng]}
+						nombre={empresa.nombre}
+						onruta={(r) => {
+							miUbicacion = r.origen;
+							rutaGeometria = r.geometria;
+						}}
 					/>
 				{:else}
 					<iframe
@@ -505,7 +565,7 @@
 				{/if}
 			</div>
 
-			<div class="mt-5 border-t border-gray-100 pt-5 dark:border-gray-800">
+			<div id="opiniones" class="mt-5 border-t border-gray-100 pt-5 dark:border-gray-800">
 				<p class="mb-3 text-xs font-semibold text-gray-400 uppercase dark:text-gray-500">
 					Opiniones
 				</p>
@@ -522,8 +582,40 @@
 					<p class="text-sm text-gray-500 dark:text-gray-400">
 						No podés calificar tu propio comercio.
 					</p>
+				{:else if turnosCalificables.length === 0}
+					<p class="text-sm text-gray-500 dark:text-gray-400">
+						Podés calificar este comercio después de tu turno.
+						{#if empresa.turnos_habilitados !== false}
+							<a
+								href={urlReservar(empresa)}
+								class="font-medium text-brand-600 hover:underline dark:text-brand-400"
+								>Reservá uno</a
+							> para poder opinar.
+						{/if}
+					</p>
 				{:else}
 					<div class="flex flex-col gap-2">
+						{#if turnosCalificables.length > 1}
+							<label class="text-xs font-medium text-gray-500 dark:text-gray-400">
+								¿Qué turno calificás?
+								<select
+									value={turnoCalificar}
+									onchange={(ev) => (turnoCalificar = Number(ev.currentTarget.value))}
+									class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+								>
+									{#each turnosCalificables as t (t.id)}
+										<option value={t.id}>
+											{formatearFechaAR(t.fecha)} · {t.hora.slice(0, 5)} hs
+										</option>
+									{/each}
+								</select>
+							</label>
+						{:else}
+							<p class="text-xs text-gray-500 dark:text-gray-400">
+								Calificás tu turno del {formatearFechaAR(turnosCalificables[0].fecha)} a las
+								{turnosCalificables[0].hora.slice(0, 5)} hs.
+							</p>
+						{/if}
 						<div class="flex items-center gap-1" role="radiogroup" aria-label="Tu puntaje">
 							{#each [1, 2, 3, 4, 5] as n (n)}
 								<button
@@ -552,11 +644,11 @@
 							</Button>
 						</div>
 					</div>
-					{#if mensajeResena}
-						<p class="mt-2 text-sm {errorResena ? 'text-danger-600' : 'text-success-600'}">
-							{mensajeResena}
-						</p>
-					{/if}
+				{/if}
+				{#if mensajeResena && auth.user && !esDueno}
+					<p class="mt-2 text-sm {errorResena ? 'text-danger-600' : 'text-success-600'}">
+						{mensajeResena}
+					</p>
 				{/if}
 
 				<ul class="mt-4 flex flex-col gap-3">

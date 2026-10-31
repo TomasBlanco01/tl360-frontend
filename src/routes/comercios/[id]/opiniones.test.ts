@@ -35,7 +35,24 @@ const RESENAS = [
 	{ usuario_nombre: 'Lucas', puntaje: 3, comentario: null, creado_en: '2026-09-02T10:00:00Z' }
 ];
 
-function backend(comercio: Record<string, unknown> = {}, resenas: unknown[] = RESENAS) {
+const TURNO_CALIFICABLE = {
+	id: 42,
+	fecha: '2020-01-06',
+	hora: '10:00:00',
+	estado: 'confirmado',
+	empresa_nombre: 'Estilo Urbano',
+	empresa_id: 7,
+	calificado: false
+};
+
+let turnosMock: Array<Record<string, unknown>> = [];
+
+function backend(
+	comercio: Record<string, unknown> = {},
+	resenas: unknown[] = RESENAS,
+	misTurnos: Array<Record<string, unknown>> = [TURNO_CALIFICABLE]
+) {
+	turnosMock = misTurnos;
 	get.mockImplementation(async (url: string) => {
 		if (url === '/empresas/7')
 			return empresa({
@@ -47,6 +64,7 @@ function backend(comercio: Record<string, unknown> = {}, resenas: unknown[] = RE
 			});
 		if (url === '/empresas/horarios/7') return {};
 		if (url === '/empresas/7/calificaciones') return resenas;
+		if (url === '/turnos/mis-turnos') return turnosMock;
 		return [];
 	});
 }
@@ -54,6 +72,11 @@ function backend(comercio: Record<string, unknown> = {}, resenas: unknown[] = RE
 const cargar = async () => {
 	render(Ficha);
 	await screen.findByRole('heading', { name: 'Estilo Urbano' });
+};
+
+const cargarConFormulario = async () => {
+	await cargar();
+	await screen.findByRole('radiogroup');
 };
 
 const USUARIO = { id: 1, nombre: 'Cliente', email: 'c@demo.com', rol: 'cliente' as const };
@@ -100,15 +123,52 @@ describe('opiniones', () => {
 		expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
 	});
 
-	it('exige elegir un puntaje antes de enviar', async () => {
+	it('sin turnos pasados no muestra el formulario (RF-13)', async () => {
+		backend({}, RESENAS, []);
 		await cargar();
+		expect(
+			await screen.findByText(/Podés calificar este comercio después de tu turno/)
+		).toBeInTheDocument();
+		expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+	});
+
+	it('con un turno pasado indica cuál se está calificando', async () => {
+		await cargarConFormulario();
+		expect(screen.getByText(/Calificás tu turno del/)).toBeInTheDocument();
+	});
+
+	it('con varios turnos pendientes permite elegir cuál calificar', async () => {
+		backend({}, RESENAS, [
+			TURNO_CALIFICABLE,
+			{ ...TURNO_CALIFICABLE, id: 43, fecha: '2020-01-07' }
+		]);
+		await cargarConFormulario();
+		const selector = screen.getByRole('combobox');
+		await userEvent.selectOptions(selector, '43');
+		await userEvent.click(screen.getByRole('radio', { name: '5 estrellas' }));
+		await userEvent.click(screen.getByRole('button', { name: 'Enviar calificación' }));
+		await waitFor(() =>
+			expect(post).toHaveBeenCalledWith(
+				'/empresas/7/calificaciones',
+				expect.objectContaining({ turno_id: 43, puntaje: 5 })
+			)
+		);
+	});
+
+	it('exige elegir un puntaje antes de enviar', async () => {
+		await cargarConFormulario();
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar calificación' }));
 		expect(await screen.findByText('Elegí un puntaje de 1 a 5 estrellas.')).toBeInTheDocument();
 		expect(post).not.toHaveBeenCalled();
 	});
 
-	it('envía puntaje y comentario y refresca la ficha y la lista', async () => {
-		await cargar();
+	it('envía turno, puntaje y comentario y refresca la ficha y la lista', async () => {
+		// Como el backend real: al calificar, el turno deja de ofrecerse.
+		post.mockImplementation(async () => {
+			turnosMock = turnosMock.map((t) => ({ ...t, calificado: true }));
+			return {};
+		});
+		await cargarConFormulario();
 		await userEvent.click(screen.getByRole('radio', { name: '4 estrellas' }));
 		expect(screen.getByRole('radio', { name: '4 estrellas' })).toHaveAttribute(
 			'aria-checked',
@@ -119,6 +179,7 @@ describe('opiniones', () => {
 
 		await waitFor(() =>
 			expect(post).toHaveBeenCalledWith('/empresas/7/calificaciones', {
+				turno_id: 42,
 				puntaje: 4,
 				comentario: 'Muy buen corte'
 			})
@@ -126,14 +187,17 @@ describe('opiniones', () => {
 		expect(await screen.findByText('¡Gracias por tu calificación!')).toBeInTheDocument();
 		// volvió a pedir la ficha (para el promedio) y las reseñas
 		expect(get.mock.calls.filter(([u]) => u === '/empresas/7').length).toBeGreaterThanOrEqual(2);
+		// ya no queda otro turno para calificar en este comercio
+		await waitFor(() => expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument());
 	});
 
 	it('sin comentario no manda el campo', async () => {
-		await cargar();
+		await cargarConFormulario();
 		await userEvent.click(screen.getByRole('radio', { name: '1 estrella' }));
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar calificación' }));
 		await waitFor(() =>
 			expect(post).toHaveBeenCalledWith('/empresas/7/calificaciones', {
+				turno_id: 42,
 				puntaje: 1,
 				comentario: undefined
 			})
@@ -142,7 +206,7 @@ describe('opiniones', () => {
 
 	it('muestra el mensaje del backend si rechaza la calificación', async () => {
 		post.mockRejectedValue(new ApiError(403, 'No podés calificar tu propio comercio'));
-		await cargar();
+		await cargarConFormulario();
 		await userEvent.click(screen.getByRole('radio', { name: '5 estrellas' }));
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar calificación' }));
 		expect(await screen.findByText('No podés calificar tu propio comercio')).toBeInTheDocument();
