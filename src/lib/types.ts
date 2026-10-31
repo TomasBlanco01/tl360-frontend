@@ -3,6 +3,8 @@ export interface Usuario {
 	nombre: string;
 	email: string;
 	rol: 'cliente' | 'admin' | 'superadmin';
+	/** RF-01: obligatorio para reservar/cancelar turnos. Ausente = verificado (compat con sesiones viejas). */
+	email_verificado?: boolean;
 }
 
 export interface Categoria {
@@ -52,6 +54,10 @@ export interface Empresa {
 	/** Coordenadas (WGS84) para el mapa; null/ausente si el comercio todavía no está geolocalizado. */
 	lat?: number | null;
 	lng?: number | null;
+	/** RF-07: distancia al usuario en km; solo la informa el backend al buscar con lat/lng. */
+	distancia_km?: number;
+	/** RF-07: si está abierto en este momento; el backend lo informa al buscar por cercanía. */
+	abierto_ahora?: boolean;
 	modo_contacto?: 'llamada' | 'mensaje' | 'ambos';
 	/** Si el comercio ofrece reserva de turnos online. Ausente/true = habilitado (compat con datos viejos). */
 	turnos_habilitados?: boolean;
@@ -66,12 +72,51 @@ export interface Empresa {
 
 export interface Publicidad {
 	id: string;
-	empresa_id: number;
+	/** `null` = colecta/evento que difunde la plataforma (RF-06), sin ficha de comercio. */
+	empresa_id: number | null;
 	/** Slug SEO del comercio (si se conoce); el carrusel prefiere slug y cae a id. */
 	empresa_slug?: string;
 	titulo: string;
 	descripcion: string;
 	imagen_url: string;
+}
+
+/** RF-06: pedido de difusión enviado desde el canal público (sin cuenta). */
+export interface SolicitudPublicidad {
+	id: number;
+	nombre: string;
+	contacto: string;
+	tipo: 'publicidad' | 'colecta';
+	mensaje: string;
+	estado: 'pendiente' | 'atendida' | 'descartada';
+	creado_en: string;
+}
+
+/** RF-04: atención sin reserva que el comercio carga a mano. */
+export interface AtencionMostrador {
+	id: number;
+	empresa_id: number;
+	fecha: string;
+	cantidad: number;
+	/** Importe manual en pesos; `null` = atención sin monto registrado. */
+	importe: number | null;
+	nota: string | null;
+	creado_en: string;
+}
+
+/** RF-04: acumulados del panel del comercio (hoy, mes en curso y total histórico). */
+export interface ResumenAtenciones {
+	hoy_cantidad: number;
+	hoy_importe: number;
+	mes_cantidad: number;
+	mes_importe: number;
+	total_cantidad: number;
+	total_importe: number;
+}
+
+export interface AtencionesDelComercio {
+	atenciones: AtencionMostrador[];
+	resumen: ResumenAtenciones;
 }
 
 /** Horarios agrupados por día: { "Lunes": ["09:00-13:00", "14:00-18:00"], ... } */
@@ -90,6 +135,8 @@ export interface MiTurno {
 	/** Para enlazar a la ficha sin otro fetch. Opcional por compat con backend viejo. */
 	empresa_id?: number;
 	empresa_slug?: string;
+	/** RF-13: el turno ya tiene su calificación (solo se califica una vez). */
+	calificado?: boolean;
 }
 
 /** Turno visto desde el panel del comercio (con el nombre del cliente). */

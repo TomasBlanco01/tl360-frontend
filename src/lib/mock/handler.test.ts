@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Empresa } from '$lib/types';
+import { hoyISO, sumarDias } from '$lib/_auditoria/fechas';
 
 // El handler guarda su estado a nivel de módulo: cada test parte de un módulo nuevo.
 async function nuevo() {
@@ -82,6 +83,30 @@ describe('mock: comercios', () => {
 		expect(siguientes.map((e) => e.id)).toEqual(data.empresasSeed.slice(3, 6).map((e) => e.id));
 	});
 
+	it('RF-07: con lat/lng ordena abiertos primero y luego por distancia', async () => {
+		const { llamar } = await nuevo();
+		const todos = (await llamar('GET', '/empresas')).data as Empresa[];
+		const referencia = todos.find((e) => e.lat != null && e.lng != null)!;
+		const cercanos = (await llamar('GET', `/empresas?lat=${referencia.lat}&lng=${referencia.lng}`))
+			.data as Empresa[];
+		const propia = cercanos.find((e) => e.id === referencia.id)!;
+		expect(propia.distancia_km).toBeCloseTo(0, 5);
+		expect(cercanos.every((e) => e.distancia_km != null)).toBe(true);
+		for (let i = 1; i < cercanos.length; i++) {
+			if (cercanos[i].abierto_ahora === cercanos[i - 1].abierto_ahora) {
+				expect(cercanos[i].distancia_km!).toBeGreaterThanOrEqual(
+					cercanos[i - 1].distancia_km! - 1e-9
+				);
+			}
+		}
+		const ultimoAbierto = cercanos.findLastIndex((e) => e.abierto_ahora === true);
+		const primerCerrado = cercanos.findIndex((e) => e.abierto_ahora === false);
+		if (ultimoAbierto >= 0 && primerCerrado >= 0) {
+			expect(ultimoAbierto).toBeLessThan(primerCerrado);
+		}
+		expect((await llamar('GET', '/empresas?lat=-35.97')).status).toBe(400);
+	});
+
 	it('la ficha incluye los teléfonos y un id inexistente da 404', async () => {
 		const { llamar } = await nuevo();
 		const ficha = await llamar('GET', '/empresas/1');
@@ -135,10 +160,12 @@ describe('mock: turnos', () => {
 			{ hora: '10:00' }
 		]);
 		const mios = (await llamar('GET', '/turnos/mis-turnos')).data;
-		expect(mios).toHaveLength(1);
-		expect(mios[0]).toMatchObject({ fecha: '2026-10-13', hora: '10:00', estado: 'confirmado' });
+		// El mock arranca con un turno histórico (para RF-13) más el recién reservado.
+		expect(mios).toHaveLength(2);
+		const reservado = mios.find((t: { id: number }) => t.id !== 9000);
+		expect(reservado).toMatchObject({ fecha: '2026-10-13', hora: '10:00', estado: 'confirmado' });
 		// 1.5/2.6 El turno trae el comercio para enlazar a la ficha sin otro fetch.
-		expect(mios[0].empresa_id).toBe(1);
+		expect(reservado.empresa_id).toBe(1);
 	});
 
 	it('los horarios ocupados son por comercio y por día', async () => {
@@ -156,15 +183,61 @@ describe('mock: turnos', () => {
 		const { llamar } = await nuevo();
 		const id = (await llamar('POST', '/turnos/reservar', reserva)).data.id;
 		expect((await llamar('DELETE', `/turnos/cancelar/${id}`)).status).toBe(200);
-		expect((await llamar('GET', '/turnos/mis-turnos')).data).toEqual([]);
+		const mios = (await llamar('GET', '/turnos/mis-turnos')).data;
+		expect(mios).toHaveLength(1);
+		expect(mios[0].id).toBe(9000);
+	});
+
+	it('RF-13: el turno histórico se califica una sola vez y queda marcado', async () => {
+		const { llamar } = await nuevo();
+		const antes = (await llamar('GET', '/turnos/mis-turnos')).data;
+		expect(antes[0]).toMatchObject({ id: 9000, calificado: false });
+		expect(
+			(
+				await llamar('POST', '/empresas/1/calificaciones', {
+					turno_id: 9000,
+					puntaje: 5,
+					comentario: 'Genial'
+				})
+			).status
+		).toBe(200);
+		expect((await llamar('GET', '/turnos/mis-turnos')).data[0].calificado).toBe(true);
+		// Recalificar el mismo turno actualiza la reseña, no la duplica.
+		expect(
+			(await llamar('POST', '/empresas/1/calificaciones', { turno_id: 9000, puntaje: 4 })).status
+		).toBe(200);
+		const resenas = (await llamar('GET', '/empresas/1/calificaciones')).data;
+		expect(resenas).toHaveLength(1);
+		expect(resenas[0].puntaje).toBe(4);
+	});
+
+	it('RF-13: exige un turno propio, del comercio y ya pasado', async () => {
+		const { llamar } = await nuevo();
+		expect((await llamar('POST', '/empresas/1/calificaciones', { puntaje: 5 })).status).toBe(400);
+		expect(
+			(await llamar('POST', '/empresas/1/calificaciones', { turno_id: 424242, puntaje: 5 })).status
+		).toBe(404);
+		expect(
+			(await llamar('POST', '/empresas/2/calificaciones', { turno_id: 9000, puntaje: 5 })).status
+		).toBe(400);
+		const futuro = new Date();
+		futuro.setDate(futuro.getDate() + 7);
+		const fecha = `${futuro.getFullYear()}-${String(futuro.getMonth() + 1).padStart(2, '0')}-${String(futuro.getDate()).padStart(2, '0')}`;
+		const turno = (
+			await llamar('POST', '/turnos/reservar', { empresa_id: 1, fecha, hora: '10:00' })
+		).data;
+		expect(
+			(await llamar('POST', '/empresas/1/calificaciones', { turno_id: turno.id, puntaje: 5 }))
+				.status
+		).toBe(400);
 	});
 
 	it('cancelar libera el slot para otros clientes (1.5)', async () => {
 		const { llamar } = await nuevo();
 		const id = (await llamar('POST', '/turnos/reservar', reserva)).data.id;
-		expect(
-			(await llamar('GET', '/turnos/ocupados?empresa_id=1&fecha=2026-10-13')).data
-		).toEqual([{ hora: '10:00' }]);
+		expect((await llamar('GET', '/turnos/ocupados?empresa_id=1&fecha=2026-10-13')).data).toEqual([
+			{ hora: '10:00' }
+		]);
 		await llamar('DELETE', `/turnos/cancelar/${id}`);
 		expect((await llamar('GET', '/turnos/ocupados?empresa_id=1&fecha=2026-10-13')).data).toEqual(
 			[]
@@ -225,6 +298,163 @@ describe('mock: cuentas', () => {
 		expect(
 			(await llamar('POST', '/auth/reset-password', { token: 't', contraseña: '123456' })).status
 		).toBe(200);
+	});
+});
+
+describe('mock: recordatorio configurable (RF-03)', () => {
+	it('lee, actualiza y valida la anticipación', async () => {
+		const { llamar } = await nuevo();
+		expect((await llamar('GET', '/usuarios/yo/recordatorio')).data).toEqual({ horas: 24 });
+		expect((await llamar('PUT', '/usuarios/yo/recordatorio', { horas: 6 })).data).toEqual({
+			horas: 6
+		});
+		expect((await llamar('GET', '/usuarios/yo/recordatorio')).data).toEqual({ horas: 6 });
+		expect((await llamar('PUT', '/usuarios/yo/recordatorio', { horas: 0 })).status).toBe(400);
+		expect((await llamar('PUT', '/usuarios/yo/recordatorio', { horas: 169 })).status).toBe(400);
+	});
+});
+
+describe('mock: verificación de correo (RF-01)', () => {
+	it('el registro nace sin verificar y el enlace de ejemplo verifica', async () => {
+		const { llamar } = await nuevo();
+		const reg = await llamar('POST', '/auth/register', {
+			nombre: 'Nueva',
+			email: 'nueva@b.com',
+			contraseña: 'Clave123'
+		});
+		expect(reg.status).toBe(201);
+		expect(reg.data.user.email_verificado).toBe(false);
+		expect(reg.data.token_verificacion).toBeTruthy();
+		const login = await llamar('POST', '/auth/login', { email: 'nueva@b.com' });
+		expect(login.data.user.email_verificado).toBe(false);
+		const ver = await llamar('POST', '/auth/verificar-email', {
+			token: reg.data.token_verificacion
+		});
+		expect(ver.status).toBe(200);
+		expect(
+			(await llamar('POST', '/auth/login', { email: 'nueva@b.com' })).data.user.email_verificado
+		).toBe(true);
+	});
+
+	it('un token desconocido da 400 y el reenvío no revela cuentas', async () => {
+		const { llamar } = await nuevo();
+		expect((await llamar('POST', '/auth/verificar-email', { token: 'no-existe' })).status).toBe(
+			400
+		);
+		const a = await llamar('POST', '/auth/reenviar-verificacion', { email: 'nadie@x.com' });
+		const b = await llamar('POST', '/auth/reenviar-verificacion', {
+			email: 'cliente@demo.com'
+		});
+		expect(a.data.message).toBe(b.data.message);
+		expect(a.data.token_verificacion).toBeUndefined();
+	});
+});
+
+describe('mock: canal público de difusión (RF-06)', () => {
+	it('recibe una solicitud sin sesión y evita duplicados pendientes', async () => {
+		const { llamar } = await nuevo();
+		const nueva = {
+			nombre: 'Feria del barrio',
+			contacto: 'feria@demo.com',
+			tipo: 'colecta',
+			mensaje: 'Feria de emprendedores el sábado en la plaza.'
+		};
+		expect((await llamar('POST', '/solicitudes-publicidad', nueva)).status).toBe(201);
+		const repetida = await llamar('POST', '/solicitudes-publicidad', {
+			...nueva,
+			contacto: 'FERIA@demo.com'
+		});
+		expect(repetida.status).toBe(409);
+	});
+
+	it('valida tipo y largo del mensaje', async () => {
+		const { llamar } = await nuevo();
+		const base = {
+			nombre: 'Ana',
+			contacto: '11 5555-1234',
+			mensaje: 'Mensaje suficientemente largo'
+		};
+		expect(
+			(await llamar('POST', '/solicitudes-publicidad', { ...base, tipo: 'sorteo' })).status
+		).toBe(400);
+		expect(
+			(await llamar('POST', '/solicitudes-publicidad', { ...base, mensaje: 'corto' })).status
+		).toBe(400);
+	});
+
+	it('la bandeja muestra pendientes y el admin las resuelve', async () => {
+		const { llamar } = await nuevo();
+		const pendientes = (await llamar('GET', '/solicitudes-publicidad')).data as { id: number }[];
+		expect(pendientes.length).toBeGreaterThan(0);
+		const id = pendientes[0].id;
+		expect(
+			(await llamar('PUT', `/solicitudes-publicidad/${id}`, { estado: 'atendida' })).status
+		).toBe(200);
+		const ahora = (await llamar('GET', '/solicitudes-publicidad')).data as { id: number }[];
+		expect(ahora.some((s) => s.id === id)).toBe(false);
+		const todas = (await llamar('GET', '/solicitudes-publicidad?todas=true')).data as {
+			id: number;
+		}[];
+		expect(todas.some((s) => s.id === id)).toBe(true);
+	});
+});
+
+describe('mock: colectas sin comercio (RF-06)', () => {
+	it('el carrusel incluye una colecta de la plataforma y se puede crear otra', async () => {
+		const { llamar } = await nuevo();
+		const lista = (await llamar('GET', '/publicidades')).data as { empresa_id: number | null }[];
+		expect(lista.some((p) => p.empresa_id === null)).toBe(true);
+		const nueva = await llamar('POST', '/publicidades', {
+			empresa_id: null,
+			titulo: 'Colecta para el merendero',
+			descripcion: 'Juntamos leche y galletitas',
+			imagen_url: 'https://x.com/colecta.jpg'
+		});
+		expect(nueva.status).toBe(201);
+		expect(nueva.data.empresa_id).toBeNull();
+	});
+});
+
+describe('mock: atenciones de mostrador (RF-04)', () => {
+	it('registra, resume y elimina una atención', async () => {
+		const { llamar } = await nuevo();
+		const alta = await llamar('POST', '/empresas/2/atenciones', {
+			cantidad: 4,
+			importe: 1000.5,
+			nota: 'Corte + barba'
+		});
+		expect(alta.status).toBe(201);
+
+		const lista = (await llamar('GET', '/empresas/2/atenciones')).data;
+		expect(lista.atenciones[0]).toMatchObject({
+			cantidad: 4,
+			importe: 1000.5,
+			nota: 'Corte + barba'
+		});
+		expect(lista.resumen).toEqual({
+			hoy_cantidad: 4,
+			hoy_importe: 1000.5,
+			mes_cantidad: 4,
+			mes_importe: 1000.5,
+			total_cantidad: 4,
+			total_importe: 1000.5
+		});
+
+		expect((await llamar('DELETE', `/empresas/2/atenciones/${alta.data.id}`)).status).toBe(200);
+		const vacio = (await llamar('GET', '/empresas/2/atenciones')).data;
+		expect(vacio.atenciones).toEqual([]);
+		expect(vacio.resumen.total_cantidad).toBe(0);
+	});
+
+	it('valida cantidad, importe y fecha futura', async () => {
+		const { llamar } = await nuevo();
+		for (const cuerpo of [
+			{ cantidad: 0 },
+			{ cantidad: 1, importe: 0 },
+			{ cantidad: 1, fecha: sumarDias(hoyISO(), 1) }
+		]) {
+			expect((await llamar('POST', '/empresas/2/atenciones', cuerpo)).status).toBe(400);
+		}
 	});
 });
 

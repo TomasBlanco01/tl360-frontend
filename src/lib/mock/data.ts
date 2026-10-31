@@ -1098,18 +1098,21 @@ export const usuariosSeed = {
 		id: 1,
 		nombre: 'Martina Gómez',
 		email: 'cliente@demo.com',
-		rol: 'cliente'
+		rol: 'cliente',
+		email_verificado: true
 	} satisfies Usuario,
 	admin: {
 		id: 101,
 		nombre: 'Sofía Ramírez',
 		email: 'negocio@demo.com',
-		rol: 'admin'
+		rol: 'admin',
+		email_verificado: true
 	} satisfies Usuario,
 	superadmin: {
 		id: 999,
 		nombre: 'Admin TL360',
 		email: 'admin@demo.com',
-		rol: 'superadmin'
+		rol: 'superadmin',
+		email_verificado: true
 	} satisfies Usuario
 };
