@@ -147,7 +147,7 @@ const EXTENSIONES_CONSTANCIA = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
  */
 export function esConstanciaValida(url: string): boolean {
 	const v = url.trim();
-	if (v === '') return true;
+	if (v === '') return false;
 	if (v.length > 2000) return false;
 	let parsed: URL;
 	try {

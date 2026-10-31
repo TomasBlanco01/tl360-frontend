@@ -27,7 +27,12 @@
 			const res = await api.post<LoginResponse>('/auth/login', values);
 			auth.login(res.token, res.user);
 			favoritos.sync();
-			goto('/');
+			// RF-01: sin correo verificado no se puede reservar; se guía a completar el paso.
+			if (res.user.email_verificado === false) {
+				goto(`/auth/verificar?email=${encodeURIComponent(res.user.email)}`);
+			} else {
+				goto('/');
+			}
 		} catch (err) {
 			console.error(err);
 			apiError =

@@ -6,6 +6,7 @@
 	import { slotsDelDia } from '$lib/turnos';
 	import { urlEmpresa } from '$lib/slug';
 	import { exigirAcceso } from '$lib/auth/guard';
+	import { auth } from '$lib/stores/auth.svelte';
 	import { toast } from '$lib/_auditoria/toast.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -22,6 +23,10 @@
 	let paso = $state<'fecha' | 'confirmar' | 'exito'>('fecha');
 	let error = $state('');
 	let reservando = $state(false);
+	// RF-01: el backend exige correo verificado (403). Se muestra el atajo en vez del formulario.
+	let sinVerificar = $state(false);
+
+	const cuentaSinVerificar = $derived(auth.user?.email_verificado === false);
 
 	$effect(() => {
 		exigirAcceso('auth');
@@ -85,10 +90,14 @@
 			if (err instanceof ApiError && err.status === 409) {
 				error = err.message || 'Ese horario se acaba de ocupar. Elegí otro disponible.';
 				cargarOcupados();
+			} else if (err instanceof ApiError && err.status === 403 && /verific/.test(err.message)) {
+				// RF-01: cuenta sin verificar. Se guía al paso pendiente en vez de mostrar solo el error.
+				error = '';
+				sinVerificar = true;
 			} else {
 				error = err instanceof ApiError ? err.message : 'No se pudo reservar el turno.';
 			}
-			toast.error(error);
+			if (error) toast.error(error);
 		} finally {
 			reservando = false;
 		}
@@ -111,6 +120,20 @@
 				<Button href="/comercios" variant="outline" size="lg">Seguir explorando</Button>
 			</div>
 		</EmptyState>
+	{:else if cuentaSinVerificar || sinVerificar}
+		<Card class="p-6">
+			<p class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+				Verificá tu correo para reservar
+			</p>
+			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+				Por seguridad, solo las cuentas con correo verificado pueden reservar turnos.
+			</p>
+			<div class="mt-4">
+				<Button href="/auth/verificar?email={encodeURIComponent(auth.user?.email ?? '')}" size="lg">
+					Verificar mi cuenta
+				</Button>
+			</div>
+		</Card>
 	{:else}
 		<Card class="p-6">
 			<label class="mb-4 block text-sm font-medium text-gray-700 dark:text-gray-200">

@@ -2,12 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { fly } from 'svelte/transition';
 	import { api, ApiError } from '$lib/api';
-	import {
-		validateForm,
-		required,
-		email as emailRule,
-		passwordSegura
-	} from '$lib/validation';
+	import { validateForm, required, email as emailRule, passwordSegura } from '$lib/validation';
 	import FormField from '$lib/components/FormField.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
@@ -54,7 +49,8 @@
 				contraseña: values.contraseña,
 				rol: values.rol
 			});
-			goto('/auth/login');
+			// RF-01: la cuenta nace sin verificar; el siguiente paso es confirmar el correo.
+			goto(`/auth/verificar?email=${encodeURIComponent(values.email)}`);
 		} catch (err) {
 			console.error(err);
 			apiError =
@@ -113,9 +109,7 @@
 			/>
 
 			<div class="flex flex-col gap-1">
-				<label for="rol" class="text-sm font-medium text-gray-700 dark:text-gray-200">
-					Rol
-				</label>
+				<label for="rol" class="text-sm font-medium text-gray-700 dark:text-gray-200"> Rol </label>
 				<select
 					id="rol"
 					bind:value={values.rol}

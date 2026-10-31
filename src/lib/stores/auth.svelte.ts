@@ -27,6 +27,13 @@ class AuthStore {
 		}
 	}
 
+	/** RF-01: marca la cuenta como verificada sin cerrar la sesión. */
+	setVerificado() {
+		if (!this.user) return;
+		this.user = { ...this.user, email_verificado: true };
+		if (browser) localStorage.setItem('user', JSON.stringify(this.user));
+	}
+
 	logout() {
 		this.token = null;
 		this.user = null;

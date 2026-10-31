@@ -204,8 +204,8 @@ describe('esTurnoPasado', () => {
 });
 
 describe('constancia de CUIT', () => {
-	it('acepta vacío (opcional) y URLs http(s) con extensión válida', () => {
-		expect(esConstanciaValida('')).toBe(true);
+	it('rechaza vacío y acepta URLs http(s) con extensión válida', () => {
+		expect(esConstanciaValida('')).toBe(false);
 		expect(esConstanciaValida('https://ejemplo.com/constancia.pdf')).toBe(true);
 		expect(esConstanciaValida('http://x.com/a.JPG')).toBe(true);
 	});
@@ -216,7 +216,8 @@ describe('constancia de CUIT', () => {
 		expect(esConstanciaValida('https://x.com/a.exe')).toBe(false);
 	});
 
-	it('el validador de formulario respeta lo mismo', () => {
+	it('el validador de formulario exige la constancia', () => {
+		expect(constanciaCuit()('')).not.toBeNull();
 		expect(constanciaCuit()('https://x.com/a.pdf')).toBeNull();
 		expect(constanciaCuit()('https://x.com/a.exe')).not.toBeNull();
 	});

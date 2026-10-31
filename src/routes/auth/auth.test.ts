@@ -64,6 +64,23 @@ describe('página de login', () => {
 		expect(auth.user).toEqual(user);
 	});
 
+	it('si la cuenta no está verificada va a verificar el correo (RF-01)', async () => {
+		const user = {
+			id: 3,
+			nombre: 'Ana',
+			email: 'ana@test.com',
+			rol: 'cliente',
+			email_verificado: false
+		};
+		post.mockResolvedValue({ message: 'ok', token: 'tok-abc', user });
+		render(Login);
+		await escribir(/Correo/, 'ana@test.com');
+		await escribir(/Contraseña/, 'clave123');
+		await userEvent.click(screen.getByRole('button', { name: 'Iniciar Sesión' }));
+
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/auth/verificar?email=ana%40test.com'));
+	});
+
 	it('muestra el mensaje del backend si las credenciales son incorrectas', async () => {
 		post.mockRejectedValue(new ApiError(401, 'Correo o contraseña incorrectos'));
 		render(Login);
@@ -160,7 +177,7 @@ describe('página de registro', () => {
 		expect(opciones).toEqual(expect.arrayContaining(['cliente', 'comercio']));
 	});
 
-	it('un registro correcto manda los datos y lleva al login', async () => {
+	it('un registro correcto manda los datos y lleva a verificar el correo (RF-01)', async () => {
 		post.mockResolvedValue({});
 		render(Register);
 		await escribir(/Nombre/, 'Ana Pérez');
@@ -168,7 +185,7 @@ describe('página de registro', () => {
 		await escribir(/^Contraseña/, 'Clave123');
 		await escribir(/Confirmar clave/, 'Clave123');
 		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
-		await waitFor(() => expect(goto).toHaveBeenCalledWith('/auth/login'));
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/auth/verificar?email=ana%40test.com'));
 		expect(post).toHaveBeenCalledWith('/auth/register', {
 			nombre: 'Ana Pérez',
 			email: 'ana@test.com',
@@ -186,7 +203,9 @@ describe('página de registro', () => {
 		await escribir(/Confirmar clave/, 'Clave123');
 		await userEvent.selectOptions(screen.getByLabelText(/Rol/), 'comercio');
 		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
-		await waitFor(() => expect(goto).toHaveBeenCalledWith('/auth/login'));
+		await waitFor(() =>
+			expect(goto).toHaveBeenCalledWith('/auth/verificar?email=local%40test.com')
+		);
 		expect(post).toHaveBeenCalledWith('/auth/register', {
 			nombre: 'Mi Local',
 			email: 'local@test.com',
