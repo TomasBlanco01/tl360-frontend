@@ -519,7 +519,7 @@
 			});
 			toast.exito('Publicidad creada.');
 			nuevaPub = { empresa_id: '', titulo: '', descripcion: '', imagen_url: '' };
-			pubsCargadas = false;
+			// Recarga directa: poner pubsCargadas en false además disparaba el $effect y pedía la lista dos veces.
 			cargarPublicidades();
 		} catch (err) {
 			errorNuevaPub = err instanceof ApiError ? err.message : 'No se pudo crear la publicidad.';
@@ -1072,13 +1072,7 @@
 								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
 							/>
 						</div>
-						<Button
-							variant="ghost"
-							onclick={() => {
-								pubsCargadas = false;
-								cargarPublicidades();
-							}}>Filtrar</Button
-						>
+						<Button variant="ghost" onclick={cargarPublicidades}>Filtrar</Button>
 					</div>
 					{#if errorPubs}
 						<p class="mb-3 text-sm text-danger-600">{errorPubs}</p>
