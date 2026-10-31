@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { goto } from '$app/navigation';
 import { ApiError, api } from '$lib/api';
+import { hoyISO } from '$lib/_auditoria/fechas';
 import { auth } from '$lib/stores/auth.svelte';
 import { empresa } from '../../tests/helpers';
 import Negocio from './+page.svelte';
@@ -18,6 +19,7 @@ vi.mock('$lib/api', async (original) => {
 const get = api.get as ReturnType<typeof vi.fn>;
 const post = api.post as ReturnType<typeof vi.fn>;
 const put = api.put as ReturnType<typeof vi.fn>;
+const del = api.delete as ReturnType<typeof vi.fn>;
 
 const DUENO = { id: 101, nombre: 'Sofía', email: 'negocio@demo.com', rol: 'admin' as const };
 
@@ -41,14 +43,28 @@ interface Backend {
 	telefonos?: unknown[];
 	turnos?: unknown;
 	calificaciones?: unknown;
+	atenciones?: unknown;
 }
+
+const sinAtenciones = {
+	atenciones: [],
+	resumen: {
+		hoy_cantidad: 0,
+		hoy_importe: 0,
+		mes_cantidad: 0,
+		mes_importe: 0,
+		total_cantidad: 0,
+		total_importe: 0
+	}
+};
 
 function backend({
 	comercio = propia,
 	horarios = { Lunes: ['09:00-12:00'] },
 	telefonos = [{ id: 1, numero: '2392411234', etiqueta: 'Emanuel' }],
 	turnos = [],
-	calificaciones = []
+	calificaciones = [],
+	atenciones = sinAtenciones
 }: Backend = {}) {
 	get.mockImplementation(async (url: string) => {
 		if (url.startsWith('/empresas?admin_id=')) return comercio ? [comercio] : [];
@@ -67,13 +83,18 @@ function backend({
 			if (calificaciones instanceof Error) throw calificaciones;
 			return calificaciones;
 		}
+		if (url === '/empresas/2700/atenciones') {
+			if (atenciones instanceof Error) throw atenciones;
+			return atenciones;
+		}
 		return [];
 	});
 }
 
 beforeEach(() => {
-	for (const f of [get, post, put]) f.mockReset();
+	for (const f of [get, post, put, del]) f.mockReset();
 	put.mockResolvedValue({});
+	del.mockResolvedValue({});
 	auth.login('tok', DUENO);
 	backend();
 	vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -125,6 +146,38 @@ describe('Mi Ficha', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Instagram' }));
 		expect(screen.getByDisplayValue('https://instagram.com/estilo')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeInTheDocument();
+	});
+
+	it('carga y guarda las etiquetas de accesibilidad (RF-18)', async () => {
+		backend({
+			comercio: { ...propia, etiquetas: ['Rampa de acceso', 'Wi-Fi gratis'] }
+		});
+		render(Negocio);
+		await abrirFicha();
+
+		expect(screen.getByRole('button', { name: 'Rampa de acceso' })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(screen.getByRole('button', { name: 'Wi-Fi gratis' })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(screen.getByRole('button', { name: 'Apto celíacos' })).toHaveAttribute(
+			'aria-pressed',
+			'false'
+		);
+
+		await userEvent.click(screen.getByRole('button', { name: 'Apto celíacos' }));
+		await userEvent.click(screen.getByRole('button', { name: 'Wi-Fi gratis' }));
+		await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+		await vi.waitFor(() =>
+			expect(put).toHaveBeenCalledWith(
+				'/empresas/2700',
+				expect.objectContaining({ etiquetas: ['Rampa de acceso', 'Apto celíacos'] })
+			)
+		);
 	});
 
 	it('sin comercio invita a crearlo', async () => {
@@ -377,6 +430,26 @@ describe('Turnos recibidos', () => {
 		expect(await screen.findByText('Todavía no recibiste turnos')).toBeInTheDocument();
 	});
 
+	it('el dueño cancela un turno y avisa al cliente', async () => {
+		backend({ turnos });
+		render(Negocio);
+		await screen.findByText('Martina Gómez');
+		await userEvent.click(screen.getAllByRole('button', { name: 'Cancelar' })[0]);
+		expect(await screen.findByText(/Se avisará al cliente/)).toBeInTheDocument();
+		await userEvent.click(screen.getByRole('button', { name: 'Sí, cancelar' }));
+		await vi.waitFor(() => expect(del).toHaveBeenCalledWith('/turnos/cancelar/1'));
+		await vi.waitFor(() => expect(screen.queryByText('Martina Gómez')).not.toBeInTheDocument());
+		expect(screen.getByText('Lucas Pérez')).toBeInTheDocument();
+	});
+
+	it('si desactivó las reservas, igual puede gestionar los turnos ya recibidos', async () => {
+		backend({ comercio: { ...propia, turnos_habilitados: false }, turnos });
+		render(Negocio);
+		expect(await screen.findByText('Martina Gómez')).toBeInTheDocument();
+		expect(screen.getByText(/No estás ofreciendo reservas nuevas/)).toBeInTheDocument();
+		expect(screen.queryByText('No ofrecés reserva de turnos')).not.toBeInTheDocument();
+	});
+
 	it('si el comercio no ofrece turnos online, lo aclara', async () => {
 		backend({ comercio: { ...propia, turnos_habilitados: false } });
 		render(Negocio);
@@ -442,10 +515,23 @@ describe('Publicidades', () => {
 		expect(post).not.toHaveBeenCalled();
 	}, 10000);
 
+	it('exige una descripción breve', async () => {
+		render(Negocio);
+		await abrirPestania('Publicidades');
+		fireEvent.input(await screen.findByLabelText('Título'), { target: { value: '2x1' } });
+		fireEvent.input(screen.getByLabelText('URL de imagen'), {
+			target: { value: 'https://x.com/a.jpg' }
+		});
+		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
+		expect(await screen.findByText('La descripción es obligatoria.')).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+	}, 10000);
+
 	it('exige imagen_url válida además del título', async () => {
 		render(Negocio);
 		await abrirPestania('Publicidades');
 		fireEvent.input(await screen.findByLabelText('Título'), { target: { value: '2x1' } });
+		fireEvent.input(screen.getByLabelText('Descripción'), { target: { value: 'Este mes' } });
 		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
 		expect(await screen.findByText(/La imagen es obligatoria/)).toBeInTheDocument();
 		expect(post).not.toHaveBeenCalled();
@@ -567,5 +653,110 @@ describe('calificaciones del comercio (RF-13)', () => {
 		expect(screen.queryByText('Lucas')).not.toBeInTheDocument();
 		await userEvent.selectOptions(screen.getByLabelText('Filtrar por puntaje'), 'todas');
 		expect(screen.getByText('Lucas')).toBeInTheDocument();
+	});
+});
+
+describe('atenciones de mostrador (RF-04)', () => {
+	const atenciones = {
+		atenciones: [
+			{
+				id: 1,
+				empresa_id: 2700,
+				fecha: hoyISO(),
+				cantidad: 2,
+				importe: 1500.5,
+				nota: 'Cortes de la mañana',
+				creado_en: '2026-10-19T12:00:00Z'
+			},
+			{
+				id: 2,
+				empresa_id: 2700,
+				fecha: '2026-09-01',
+				cantidad: 5,
+				importe: null,
+				nota: null,
+				creado_en: '2026-09-01T12:00:00Z'
+			}
+		],
+		resumen: {
+			hoy_cantidad: 2,
+			hoy_importe: 1500.5,
+			mes_cantidad: 2,
+			mes_importe: 1500.5,
+			total_cantidad: 12,
+			total_importe: 9000
+		}
+	};
+
+	it('muestra métricas, listado y pide el endpoint del comercio', async () => {
+		backend({ atenciones });
+		render(Negocio);
+		await abrirPestania('Mostrador');
+
+		expect(await screen.findByText('Cortes de la mañana')).toBeInTheDocument();
+		expect(screen.getByText('Hoy')).toBeInTheDocument();
+		expect(screen.getByText('Este mes')).toBeInTheDocument();
+		expect(screen.getByText('Acumulado')).toBeInTheDocument();
+		expect(screen.getByText('$ 9.000')).toBeInTheDocument();
+		expect(get).toHaveBeenCalledWith('/empresas/2700/atenciones');
+	});
+
+	it('sin atenciones invita a registrar la primera', async () => {
+		render(Negocio);
+		await abrirPestania('Mostrador');
+		expect(await screen.findByText('Todavía no registraste atenciones')).toBeInTheDocument();
+	});
+
+	it('registra una atención con cantidad, importe y nota', async () => {
+		post.mockResolvedValue({ ...atenciones.atenciones[0], id: 3 });
+		render(Negocio);
+		await abrirPestania('Mostrador');
+		await screen.findByLabelText(/Cantidad de servicios/);
+
+		fireEvent.input(screen.getByLabelText(/Cantidad de servicios/), { target: { value: '2' } });
+		fireEvent.input(screen.getByLabelText('Importe cobrado (opcional)'), {
+			target: { value: '8000' }
+		});
+		fireEvent.input(screen.getByLabelText('Nota (opcional)'), {
+			target: { value: 'Corte + barba' }
+		});
+		await userEvent.click(screen.getByRole('button', { name: 'Registrar atención' }));
+
+		await vi.waitFor(() =>
+			expect(post).toHaveBeenCalledWith('/empresas/2700/atenciones', {
+				fecha: hoyISO(),
+				cantidad: 2,
+				importe: 8000,
+				nota: 'Corte + barba'
+			})
+		);
+		expect(screen.getByLabelText(/Cantidad de servicios/)).toHaveValue(1);
+	});
+
+	it('rechaza cantidades inválidas sin llamar al backend', async () => {
+		render(Negocio);
+		await abrirPestania('Mostrador');
+		await screen.findByLabelText(/Cantidad de servicios/);
+
+		fireEvent.input(screen.getByLabelText(/Cantidad de servicios/), { target: { value: '0' } });
+		await userEvent.click(screen.getByRole('button', { name: 'Registrar atención' }));
+		expect(
+			await screen.findByText('La cantidad debe ser un entero entre 1 y 1000.')
+		).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+	});
+
+	it('elimina una atención después de confirmar', async () => {
+		backend({ atenciones });
+		render(Negocio);
+		await abrirPestania('Mostrador');
+		await screen.findByText('Cortes de la mañana');
+
+		await userEvent.click(screen.getAllByRole('button', { name: 'Eliminar' })[0]);
+		expect(await screen.findByText('Eliminar atención')).toBeInTheDocument();
+		await userEvent.click(screen.getByRole('button', { name: 'Sí, eliminar' }));
+
+		await vi.waitFor(() => expect(del).toHaveBeenCalledWith('/empresas/2700/atenciones/1'));
+		await vi.waitFor(() => expect(screen.queryByText('Eliminar atención')).not.toBeInTheDocument());
 	});
 });

@@ -5,6 +5,8 @@
 	import { publicidades } from '$lib/stores/publicidades.svelte';
 	import { toast } from '$lib/_auditoria/toast.svelte';
 	import type {
+		AtencionMostrador,
+		AtencionesDelComercio,
 		Categoria,
 		Empresa,
 		HorariosPorDia,
@@ -12,6 +14,7 @@
 		TelefonoEmpresa,
 		TurnoRecibido
 	} from '$lib/types';
+	import { hoyISO } from '$lib/_auditoria/fechas';
 	import {
 		validateForm,
 		required,
@@ -23,6 +26,7 @@
 	} from '$lib/validation';
 	import { cacheHorarios } from '$lib/horarios-cache';
 	import { DIAS_ORDEN } from '$lib/turnos';
+	import { CATALOGO_ETIQUETAS } from '$lib/etiquetas';
 	import { separarTelefono } from '$lib/contacto';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -86,6 +90,8 @@
 	let telefonos = $state<TelefonoEmpresa[]>([]);
 	// Fotos: URLs cargadas a mano, mismo patrón que imagen_url de Publicidad.
 	let fotos = $state<string[]>([]);
+	// RF-18: etiquetas de accesibilidad y servicios que el cliente puede filtrar.
+	let etiquetasSeleccionadas = $state<string[]>([]);
 
 	$effect(() => {
 		if (!exigirAcceso('admin')) return;
@@ -115,6 +121,7 @@
 					categoriaId = String(propia.categoria_id ?? '');
 					turnosHabilitados = propia.turnos_habilitados ?? true;
 					fotos = propia.fotos ?? [];
+					etiquetasSeleccionadas = propia.etiquetas ?? [];
 					modoContacto = propia.modo_contacto ?? 'ambos';
 					latitud = propia.lat ?? null;
 					longitud = propia.lng ?? null;
@@ -151,6 +158,12 @@
 
 	function quitarFoto(index: number) {
 		fotos = fotos.filter((_, i) => i !== index);
+	}
+
+	function alternarEtiquetaFicha(etiqueta: string) {
+		etiquetasSeleccionadas = etiquetasSeleccionadas.includes(etiqueta)
+			? etiquetasSeleccionadas.filter((e) => e !== etiqueta)
+			: [...etiquetasSeleccionadas, etiqueta];
 	}
 
 	function payloadTelefonos() {
@@ -229,6 +242,7 @@
 			categoria_id: Number(categoriaId),
 			admin_id: auth.user?.id,
 			fotos: fotos.map((f) => f.trim()).filter(Boolean),
+			etiquetas: etiquetasSeleccionadas,
 			turnos_habilitados: turnosHabilitados,
 			modo_contacto: modoContacto,
 			lat: latitud,
@@ -395,7 +409,7 @@
 			// 1.5 El mock libera el slot en `ocupados`: vuelve a estar disponible al instante.
 			await api.delete(`/turnos/cancelar/${turnoACancelar.id}`);
 			turnosRecibidos = (turnosRecibidos ?? []).filter((t) => t.id !== turnoACancelar!.id);
-			toast.exito('Turno cancelado. El horario quedó libre.');
+			toast.exito('Turno cancelado. Avisamos al cliente y el horario quedó libre.');
 			turnoACancelar = null;
 		} catch (err) {
 			toast.error(err instanceof ApiError ? err.message : 'No se pudo cancelar el turno.');
@@ -412,6 +426,124 @@
 		});
 	}
 
+	// ---------- Mostrador: atenciones sin reserva (RF-04) ----------
+	let atenciones = $state<AtencionesDelComercio | null>(null);
+	let errorAtenciones = $state('');
+	let guardandoAtencion = $state(false);
+	let atencionAEliminar = $state<AtencionMostrador | null>(null);
+	let eliminandoAtencion = $state(false);
+	let mensajeAtencion = $state('');
+
+	function atencionVacia() {
+		return { fecha: hoyISO(), cantidad: '1', importe: '', nota: '' };
+	}
+	let nuevaAtencion = $state(atencionVacia());
+
+	const importeARS = new Intl.NumberFormat('es-AR', {
+		style: 'currency',
+		currency: 'ARS',
+		minimumFractionDigits: 0,
+		maximumFractionDigits: 2
+	});
+
+	function formatearImporte(importe: number) {
+		return importeARS.format(importe);
+	}
+
+	function recargarAtenciones() {
+		if (!miEmpresa) return;
+		atenciones = null;
+		errorAtenciones = '';
+		api
+			.get<AtencionesDelComercio>(`/empresas/${miEmpresa.id}/atenciones`)
+			.then((res) => (atenciones = res))
+			.catch((err) => {
+				console.error(err);
+				errorAtenciones =
+					err instanceof ApiError ? err.message : 'No se pudieron cargar las atenciones.';
+				atenciones = {
+					atenciones: [],
+					resumen: {
+						hoy_cantidad: 0,
+						hoy_importe: 0,
+						mes_cantidad: 0,
+						mes_importe: 0,
+						total_cantidad: 0,
+						total_importe: 0
+					}
+				};
+			});
+	}
+
+	$effect(() => {
+		if (tab !== 'mostrador' || !miEmpresa || atenciones !== null) return;
+		recargarAtenciones();
+	});
+
+	async function registrarAtencion() {
+		if (!miEmpresa) return;
+		mensajeAtencion = '';
+		const fallar = (mensaje: string) => {
+			mensajeAtencion = mensaje;
+			toast.error(mensaje);
+		};
+		const cantidad = Number(nuevaAtencion.cantidad);
+		if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 1000) {
+			fallar('La cantidad debe ser un entero entre 1 y 1000.');
+			return;
+		}
+		if (nuevaAtencion.fecha > hoyISO()) {
+			fallar('No podés registrar atenciones futuras.');
+			return;
+		}
+		let importe: number | null = null;
+		const importeTexto = String(nuevaAtencion.importe ?? '').trim();
+		if (importeTexto) {
+			importe = Number(importeTexto);
+			if (!Number.isFinite(importe) || importe <= 0) {
+				fallar('El importe debe ser mayor a cero.');
+				return;
+			}
+			importe = Math.round(importe * 100) / 100;
+		}
+		const nota = String(nuevaAtencion.nota ?? '').trim();
+		if (nota.length > 300) {
+			fallar('La nota no puede superar los 300 caracteres.');
+			return;
+		}
+		guardandoAtencion = true;
+		try {
+			await api.post<AtencionMostrador>(`/empresas/${miEmpresa.id}/atenciones`, {
+				fecha: nuevaAtencion.fecha || hoyISO(),
+				cantidad,
+				importe,
+				nota: nota || null
+			});
+			toast.exito('Atención registrada.');
+			nuevaAtencion = atencionVacia();
+			recargarAtenciones();
+		} catch (err) {
+			fallar(err instanceof ApiError ? err.message : 'No se pudo registrar la atención.');
+		} finally {
+			guardandoAtencion = false;
+		}
+	}
+
+	async function confirmarEliminarAtencion() {
+		if (!miEmpresa || !atencionAEliminar) return;
+		eliminandoAtencion = true;
+		try {
+			await api.delete(`/empresas/${miEmpresa.id}/atenciones/${atencionAEliminar.id}`);
+			toast.exito('Atención eliminada.');
+			atencionAEliminar = null;
+			recargarAtenciones();
+		} catch (err) {
+			toast.error(err instanceof ApiError ? err.message : 'No se pudo eliminar la atención.');
+		} finally {
+			eliminandoAtencion = false;
+		}
+	}
+
 	// ---------- Publicidades ----------
 	let nuevaPublicidad = $state({ titulo: '', descripcion: '', imagen_url: '' });
 	let mensajePublicidad = $state('');
@@ -421,6 +553,11 @@
 		mensajePublicidad = '';
 		if (!nuevaPublicidad.titulo.trim()) {
 			mensajePublicidad = 'El título es obligatorio.';
+			toast.error(mensajePublicidad);
+			return;
+		}
+		if (!nuevaPublicidad.descripcion.trim()) {
+			mensajePublicidad = 'La descripción es obligatoria.';
 			toast.error(mensajePublicidad);
 			return;
 		}
@@ -488,6 +625,7 @@
 			{ id: 'ficha', label: 'Mi Ficha' },
 			{ id: 'horarios', label: 'Horarios' },
 			{ id: 'turnos', label: 'Turnos recibidos' },
+			{ id: 'mostrador', label: 'Mostrador' },
 			{ id: 'calificaciones', label: 'Calificaciones' },
 			{ id: 'publicidades', label: 'Publicidades' }
 		]}
@@ -614,6 +752,31 @@
 						{#if formErrors.categoriaId}
 							<p class="mt-1 text-xs text-danger-600">{formErrors.categoriaId}</p>
 						{/if}
+					</div>
+
+					<!-- RF-18 Etiquetas de accesibilidad y servicios -->
+					<div>
+						<p class="mb-1 text-sm font-medium text-gray-700 dark:text-gray-200">
+							Etiquetas de accesibilidad y servicios
+						</p>
+						<p class="mb-2 text-xs text-gray-400 dark:text-gray-500">
+							Marcá las que ofrecés. Los clientes pueden filtrar el directorio por ellas.
+						</p>
+						<div class="flex flex-wrap gap-2">
+							{#each CATALOGO_ETIQUETAS as etiqueta (etiqueta)}
+								{@const activa = etiquetasSeleccionadas.includes(etiqueta)}
+								<button
+									type="button"
+									aria-pressed={activa}
+									onclick={() => alternarEtiquetaFicha(etiqueta)}
+									class="rounded-full border px-3 py-1.5 text-xs font-semibold transition {activa
+										? 'border-brand-500 bg-brand-500 text-white'
+										: 'border-gray-300 bg-white text-gray-600 hover:border-brand-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
+								>
+									{etiqueta}
+								</button>
+							{/each}
+						</div>
 					</div>
 
 					<!-- 1.4 CUIT + constancia -->
@@ -946,26 +1109,30 @@
 					title="Primero cargá tu ficha"
 					description="Necesitás crear tu comercio en la pestaña Mi Ficha."
 				/>
-			{:else if !turnosHabilitados}
-				<EmptyState
-					title="No ofrecés reserva de turnos"
-					description="Activá 'Ofrecer reserva de turnos online' en Mi Ficha si querés recibir turnos por la app."
-				/>
 			{:else if errorTurnos}
 				<EmptyState title="No se pudieron cargar los turnos" description={errorTurnos} />
 			{:else if turnosRecibidos === null}
 				<p class="text-sm text-gray-400 dark:text-gray-500">Cargando turnos...</p>
 			{:else if turnosRecibidos.length === 0}
-				<EmptyState
-					title="Todavía no recibiste turnos"
-					description="Cuando un cliente reserve, va a aparecer acá."
-				/>
+				{#if !turnosHabilitados}
+					<EmptyState
+						title="No ofrecés reserva de turnos"
+						description="Activá 'Ofrecer reserva de turnos online' en Mi Ficha si querés recibir turnos por la app."
+					/>
+				{:else}
+					<EmptyState
+						title="Todavía no recibiste turnos"
+						description="Cuando un cliente reserve, va a aparecer acá."
+					/>
+				{/if}
 			{:else}
+				{#if !turnosHabilitados}
+					<p class="mb-3 text-sm text-gray-500 dark:text-gray-400">
+						No estás ofreciendo reservas nuevas; estos son los turnos que ya recibiste.
+					</p>
+				{/if}
 				<div class="mb-3 flex flex-wrap items-center gap-2">
-					<label
-						for="filtro-dia"
-						class="text-sm font-medium text-gray-700 dark:text-gray-200"
-					>
+					<label for="filtro-dia" class="text-sm font-medium text-gray-700 dark:text-gray-200">
 						Filtrar por día
 					</label>
 					<input
@@ -995,7 +1162,9 @@
 						{#each turnosFiltrados as turno (turno.id)}
 							<Card class="flex items-center justify-between gap-3 p-4">
 								<div>
-									<p class="font-semibold text-gray-800 dark:text-gray-100">{turno.cliente_nombre}</p>
+									<p class="font-semibold text-gray-800 dark:text-gray-100">
+										{turno.cliente_nombre}
+									</p>
 									<p class="text-sm text-gray-500 dark:text-gray-400">
 										{formatearFecha(turno.fecha)}
 									</p>
@@ -1016,6 +1185,122 @@
 					</div>
 				{/if}
 			{/if}
+		{:else if tab === 'mostrador'}
+			{#if !miEmpresa}
+				<EmptyState
+					title="Primero cargá tu ficha"
+					description="Necesitás crear tu comercio en la pestaña Mi Ficha."
+				/>
+			{:else if errorAtenciones}
+				<EmptyState title="No se pudieron cargar las atenciones" description={errorAtenciones} />
+			{:else if atenciones === null}
+				<p class="text-sm text-gray-400 dark:text-gray-500">Cargando atenciones...</p>
+			{:else}
+				<div class="mb-4 grid gap-3 sm:grid-cols-3">
+					{#each [{ titulo: 'Hoy', cantidad: atenciones.resumen.hoy_cantidad, importe: atenciones.resumen.hoy_importe }, { titulo: 'Este mes', cantidad: atenciones.resumen.mes_cantidad, importe: atenciones.resumen.mes_importe }, { titulo: 'Acumulado', cantidad: atenciones.resumen.total_cantidad, importe: atenciones.resumen.total_importe }] as metrica (metrica.titulo)}
+						<Card class="p-4">
+							<p
+								class="text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400"
+							>
+								{metrica.titulo}
+							</p>
+							<p class="mt-1 text-2xl font-bold text-gray-800 dark:text-gray-100">
+								{metrica.cantidad}
+								<span class="text-sm font-medium text-gray-500 dark:text-gray-400">
+									{metrica.cantidad === 1 ? 'servicio' : 'servicios'}
+								</span>
+							</p>
+							<p class="text-sm text-gray-500 dark:text-gray-400">
+								{formatearImporte(metrica.importe)}
+							</p>
+						</Card>
+					{/each}
+				</div>
+
+				<Card class="max-w-xl p-6">
+					<p class="text-sm font-semibold text-gray-700 dark:text-gray-200">
+						Registrar atención sin reserva
+					</p>
+					<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+						Para clientes que entran sin turno. Se suma al acumulado del comercio.
+					</p>
+					<div class="mt-4 grid gap-3 sm:grid-cols-2">
+						<FormField
+							label="Fecha"
+							type="date"
+							max={hoyISO()}
+							bind:value={nuevaAtencion.fecha}
+							required
+						/>
+						<FormField
+							label="Cantidad de servicios"
+							type="number"
+							min="1"
+							max="1000"
+							step="1"
+							bind:value={nuevaAtencion.cantidad}
+							required
+						/>
+						<FormField
+							label="Importe cobrado (opcional)"
+							type="number"
+							min="0"
+							step="0.01"
+							placeholder="Ej: 8000"
+							bind:value={nuevaAtencion.importe}
+						/>
+						<FormField
+							label="Nota (opcional)"
+							placeholder="Ej: corte + barba"
+							bind:value={nuevaAtencion.nota}
+						/>
+					</div>
+					<Button class="mt-4" disabled={guardandoAtencion} onclick={registrarAtencion}>
+						{guardandoAtencion ? 'Guardando...' : 'Registrar atención'}
+					</Button>
+					{#if mensajeAtencion}
+						<p class="mt-2 text-sm text-danger-600">{mensajeAtencion}</p>
+					{/if}
+				</Card>
+
+				<h2 class="mt-6 mb-3 text-lg font-semibold text-gray-800 dark:text-gray-100">
+					Últimas atenciones
+				</h2>
+				{#if atenciones.atenciones.length === 0}
+					<EmptyState
+						title="Todavía no registraste atenciones"
+						description="Cargá la primera atención de mostrador con el formulario de arriba."
+					/>
+				{:else}
+					<div class="flex flex-col gap-3">
+						{#each atenciones.atenciones as atencion (atencion.id)}
+							<Card class="flex items-center justify-between gap-3 p-4">
+								<div>
+									<p class="font-semibold text-gray-800 dark:text-gray-100">
+										{atencion.cantidad}
+										{atencion.cantidad === 1 ? 'servicio' : 'servicios'}
+									</p>
+									<p class="text-sm text-gray-500 dark:text-gray-400">
+										{formatearFecha(atencion.fecha)}
+										{#if atencion.importe !== null}
+											· {formatearImporte(atencion.importe)}
+										{/if}
+									</p>
+									{#if atencion.nota}
+										<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{atencion.nota}</p>
+									{/if}
+								</div>
+								<button
+									class="text-xs font-medium text-danger-600 hover:underline"
+									onclick={() => (atencionAEliminar = atencion)}
+								>
+									Eliminar
+								</button>
+							</Card>
+						{/each}
+					</div>
+				{/if}
+			{/if}
 		{:else if tab === 'calificaciones'}
 			{#if !miEmpresa}
 				<EmptyState
@@ -1023,7 +1308,10 @@
 					description="Necesitás crear tu comercio en la pestaña Mi Ficha."
 				/>
 			{:else if errorCalificaciones}
-				<EmptyState title="No se pudieron cargar las calificaciones" description={errorCalificaciones} />
+				<EmptyState
+					title="No se pudieron cargar las calificaciones"
+					description={errorCalificaciones}
+				/>
 			{:else if calificaciones === null}
 				<p class="text-sm text-gray-400 dark:text-gray-500">Cargando calificaciones...</p>
 			{:else if calificaciones.length === 0}
@@ -1125,10 +1413,22 @@
 	abierto={turnoACancelar !== null}
 	titulo="Cancelar turno"
 	descripcion={turnoACancelar
-		? `¿Cancelar el turno de ${turnoACancelar.cliente_nombre} (${turnoACancelar.hora.slice(0, 5)} hs)? El horario quedará libre.`
+		? `¿Cancelar el turno de ${turnoACancelar.cliente_nombre} (${turnoACancelar.hora.slice(0, 5)} hs)? Se avisará al cliente y el horario quedará libre.`
 		: ''}
 	confirmarTexto="Sí, cancelar"
 	oncancelar={() => (turnoACancelar = null)}
 	onconfirmar={confirmarCancelarTurno}
 	ocupado={cancelandoTurno}
+/>
+
+<ConfirmModal
+	abierto={atencionAEliminar !== null}
+	titulo="Eliminar atención"
+	descripcion={atencionAEliminar
+		? `¿Eliminar la atención de ${formatearFecha(atencionAEliminar.fecha)} (${atencionAEliminar.cantidad} ${atencionAEliminar.cantidad === 1 ? 'servicio' : 'servicios'})? Esta acción no se puede deshacer.`
+		: ''}
+	confirmarTexto="Sí, eliminar"
+	oncancelar={() => (atencionAEliminar = null)}
+	onconfirmar={confirmarEliminarAtencion}
+	ocupado={eliminandoAtencion}
 />

@@ -6,7 +6,10 @@
 		error = '',
 		required: isRequired = false,
 		placeholder = '',
-		id
+		id,
+		min,
+		max,
+		step
 	}: {
 		label: string;
 		type?: string;
@@ -15,6 +18,9 @@
 		required?: boolean;
 		placeholder?: string;
 		id?: string;
+		min?: string | number;
+		max?: string | number;
+		step?: string | number;
 	} = $props();
 
 	const fieldId = $derived(id ?? label.toLowerCase().replace(/\s+/g, '-'));
@@ -28,6 +34,9 @@
 		{type}
 		id={fieldId}
 		{placeholder}
+		{min}
+		{max}
+		{step}
 		bind:value
 		class="rounded-lg border bg-white px-3 py-2 text-gray-800 transition outline-none focus:ring-2 focus:ring-brand-300 dark:bg-gray-800 dark:text-gray-100 {error
 			? 'border-danger-600'
