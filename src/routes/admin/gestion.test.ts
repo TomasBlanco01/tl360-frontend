@@ -491,18 +491,43 @@ describe('solapa Publicidades (RF-06)', () => {
 describe('verificación comercial (RF-15)', () => {
 	const pendiente = { id: 2, nombre: 'Barbería Dorrego', cuit: '20123456786', slug: 'x' };
 
-	it('rechazar quita al comercio de la bandeja', async () => {
+	it('rechazar exige un motivo y lo envía al backend', async () => {
 		get.mockImplementation(async (url: string) =>
 			url.startsWith('/empresas?verificado_estado=pendiente') ? [pendiente] : backend(url)
 		);
 		render(Admin);
 		await screen.findByText('Barbería Dorrego');
 		await userEvent.click(screen.getByRole('button', { name: 'Rechazar' }));
+		const motivo = screen.getByLabelText(/Motivo del rechazo/);
+		await userEvent.type(motivo, 'no');
+		await userEvent.click(screen.getByRole('button', { name: 'Confirmar rechazo' }));
+		expect(await screen.findByRole('alert')).toHaveTextContent(/entre 5 y 500 caracteres/);
+		expect(put).not.toHaveBeenCalled();
+
+		await userEvent.clear(motivo);
+		await userEvent.type(motivo, '  La constancia está vencida  ');
+		await userEvent.click(screen.getByRole('button', { name: 'Confirmar rechazo' }));
 		await vi.waitFor(() =>
-			expect(put).toHaveBeenCalledWith('/empresas/2/verificacion', { accion: 'rechazar' })
+			expect(put).toHaveBeenCalledWith('/empresas/2/verificacion', {
+				accion: 'rechazar',
+				motivo: 'La constancia está vencida'
+			})
 		);
 		await vi.waitFor(() => expect(screen.queryByText('Barbería Dorrego')).not.toBeInTheDocument());
 		expect(avisos()).toContain('Verificación de “Barbería Dorrego” rechazada.');
+	});
+
+	it('cancelar el rechazo no envía nada', async () => {
+		get.mockImplementation(async (url: string) =>
+			url.startsWith('/empresas?verificado_estado=pendiente') ? [pendiente] : backend(url)
+		);
+		render(Admin);
+		await screen.findByText('Barbería Dorrego');
+		await userEvent.click(screen.getByRole('button', { name: 'Rechazar' }));
+		await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+		expect(screen.queryByLabelText(/Motivo del rechazo/)).not.toBeInTheDocument();
+		expect(put).not.toHaveBeenCalled();
+		expect(screen.getByText('Barbería Dorrego')).toBeInTheDocument();
 	});
 
 	it('si el backend no puede resolverla, la conserva y avisa', async () => {
