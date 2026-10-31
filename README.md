@@ -39,10 +39,10 @@ npm run test:coverage # Cobertura (reporte HTML en coverage/)
 
 Con `PUBLIC_MOCK_MODE=true` (valor por defecto documentado en `.env.example`), el frontend **emula el 100% de las respuestas de API en memoria** sin tocar ningún backend ni base de datos.
 
-*   **Implementación:** `src/lib/api.ts` delega a `src/lib/mock/handler.ts` + datos seed en `src/lib/mock/data.ts` (27 rubros, 54 comercios, horarios, teléfonos, fotos, turnos).
-*   **Activación:** copiar `.env.example` a `.env` — ya viene con `PUBLIC_MOCK_MODE=true`. No se requiere configurar `PUBLIC_API_URL`.
-*   **Datos en memoria:** viven solo en la pestaña del navegador; **se resetean al recargar** la página. Ideal para recorrer todas las pantallas con contenido realista.
-*   **Backend real (opcional):** para consumir el backend Rust/Axum o Express, poner `PUBLIC_MOCK_MODE=false` y apuntar `PUBLIC_API_URL=http://localhost:3001` con el backend corriendo.
+- **Implementación:** `src/lib/api.ts` delega a `src/lib/mock/handler.ts` + datos seed en `src/lib/mock/data.ts` (27 rubros, 54 comercios, horarios, teléfonos, fotos, turnos).
+- **Activación:** copiar `.env.example` a `.env` — ya viene con `PUBLIC_MOCK_MODE=true`. No se requiere configurar `PUBLIC_API_URL`.
+- **Datos en memoria:** viven solo en la pestaña del navegador; **se resetean al recargar** la página. Ideal para recorrer todas las pantallas con contenido realista.
+- **Backend real (opcional):** para consumir el backend Rust/Axum o Express, poner `PUBLIC_MOCK_MODE=false` y apuntar `PUBLIC_API_URL=http://localhost:3001` con el backend corriendo.
 
 Variables de entorno (ver `.env.example`):
 
@@ -57,11 +57,11 @@ PUBLIC_MOCK_MODE=true
 
 En modo mock **cualquier contraseña es válida** (no se valida). Usar estos emails para probar cada rol:
 
-| Email | Rol | Qué probar |
-|---|---|---|
-| `cliente@demo.com` | Cliente | Buscar comercios, reservar turnos, favoritos, historial en `/cuenta`, mapa |
-| `negocio@demo.com` | Comercio | Gestionar ficha, horarios, colaboradores, teléfonos múltiples, fotos, redes sociales, publicidades en `/negocio` (ficha pre-cargada: "Estilo Urbano Peluquería") |
-| `admin@demo.com` | Superadmin | ABM de rubros/categorías y moderación en `/admin` |
+| Email              | Rol        | Qué probar                                                                                                                                                       |
+| ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cliente@demo.com` | Cliente    | Buscar comercios, reservar turnos, favoritos, historial en `/cuenta`, mapa                                                                                       |
+| `negocio@demo.com` | Comercio   | Gestionar ficha, horarios, colaboradores, teléfonos múltiples, fotos, redes sociales, publicidades en `/negocio` (ficha pre-cargada: "Estilo Urbano Peluquería") |
+| `admin@demo.com`   | Superadmin | ABM de rubros/categorías y moderación en `/admin`                                                                                                                |
 
 También funciona cualquier otro email no listado — ingresará como `cliente`.
 
@@ -69,11 +69,16 @@ También funciona cualquier otro email no listado — ingresará como `cliente`.
 
 ## Funcionalidades Implementadas
 
-*   **Directorio:** listado con búsqueda por nombre, filtro por rubro (17 rubros con reserva + 10 solo-contacto), tarjetas con calificación y badge de estado.
-*   **Ficha de comercio:** horarios semanales, teléfonos múltiples con Llamar/WhatsApp, fotos, Instagram/Facebook, mapa embebido, indicador abierto/cerrado, favoritos.
-*   **Turnero:** selección de fecha → grilla de slots por duración configurable → confirmación; maneja solapamientos (409), feriados y filtrado de horas pasadas.
-*   **Dashboards:** Cliente (`/cuenta` — Mis Turnos / Favoritos), Comercio (`/negocio` — Mi Ficha / Horarios / Turnos recibidos / Publicidades), Superadmin (`/admin` — ABM categorías).
-*   **Extras:** tema claro/oscuro + color de acento personalizable, autenticación JWT (mock), validaciones consistentes, manejo de errores y 401 con logout automático.
+- **Directorio:** listado con búsqueda por nombre, filtro por rubro (17 rubros con reserva + 10 solo-contacto), tarjetas con calificación y badge de estado. El botón **"Cerca de mí"** (RF-07) pide ubicación con consentimiento, ordena por cercanía + abiertos primero desde el backend y muestra la distancia en cada tarjeta; las coordenadas quedan en la URL para compartir o volver atrás.
+- **Etiquetas (RF-18):** el comercio marca accesibilidad y servicios en `/negocio` (rampa, baño adaptado, apto celíacos, acepta mascotas, Wi-Fi, etc.); el directorio filtra por una o varias con semántica AND y el backend real las devuelve en el listado y la ficha.
+- **Ficha de comercio:** horarios semanales, teléfonos múltiples con Llamar/WhatsApp, fotos, Instagram/Facebook, mapa embebido, indicador abierto/cerrado, favoritos y ruta **"Cómo llegar"** (geolocalización + OSRM, con respaldo de Google Maps).
+- **Turnero:** selección de fecha → grilla de slots por duración configurable → confirmación; maneja solapamientos (409), feriados y filtrado de horas pasadas.
+- **Cancelación (RF-05):** el cliente cancela desde `/cuenta` con la anticipación del comercio y el dueño desde “Turnos recibidos” en `/negocio`; en ese caso se avisa al cliente y el horario queda libre. El panel sigue mostrando los turnos ya recibidos aunque el comercio desactive las reservas nuevas.
+- **Mostrador (RF-04):** el comercio registra atenciones sin reserva (fecha, cantidad, importe opcional, nota) y ve acumulados de hoy, del mes y totales, sin manejar cobros.
+- **Difusión (RF-06):** carrusel de destacados con botón compartir (Web Share / WhatsApp), colectas y eventos sin comercio, y canal público `/publicitar` sin registro con bandeja de pedidos en `/admin`.
+- **PWA y push (RNF-04):** manifest instalable, service worker con precache del build, navegación offline con respaldo en `static/offline.html` y tema de la app. El cliente activa notificaciones desde `/cuenta` (`lib/push.ts` + `POST /push/suscripciones`), y el service worker muestra avisos y abre su destino; el backend también envía recordatorios de turnos y el resumen semanal al comercio. El cliente configura la anticipación del recordatorio (1 h a 3 días, 24 h por defecto) desde la misma tarjeta de `/cuenta`. Requiere backend con `VAPID_PRIVATE_KEY` y HTTPS (o `localhost`); en modo mock la suscripción se simula pero no hay envíos reales.
+- **Dashboards:** Cliente (`/cuenta` — Mis Turnos / Favoritos), Comercio (`/negocio` — Mi Ficha / Horarios / Turnos recibidos / Mostrador / Calificaciones / Publicidades), Superadmin (`/admin` — ABM categorías, verificación, publicidades, solicitudes y reportes).
+- **Extras:** tema claro/oscuro + color de acento personalizable, autenticación JWT (mock), validaciones consistentes, manejo de errores y 401 con logout automático.
 
 **Estructura de rutas:**
 
@@ -88,6 +93,7 @@ src/routes/
   cuenta/+page.svelte                  # Dashboard cliente
   negocio/+page.svelte                 # Dashboard comercio
   admin/+page.svelte                   # Panel superadmin
+  publicitar/+page.svelte              # Pedido público de difusión (sin cuenta)
   mapa/+page.svelte                    # Mapa de comercios
 ```
 
@@ -95,16 +101,16 @@ src/routes/
 
 ## Stack Tecnológico
 
-| Tecnología | Versión / Uso |
-|---|---|
-| **Svelte 5** | Runes (`$state`, `$derived`) — reactividad moderna |
-| **SvelteKit 2** | Framework full-stack, SSR deshabilitado (`ssr=false`) por auth en localStorage |
-| **Tailwind CSS v4** | Estilos con tokens de marca en `src/routes/layout.css` (`@theme`) |
-| **TypeScript** | Tipado estricto |
-| **Lucide Icons** | Iconografía (`@lucide/svelte`) |
-| **Vite 8** | Bundler y dev server |
-| **Vitest + Testing Library** | Tests unitarios, de componentes y de pantallas (`jsdom`) |
-| **SweetAlert2** | Diálogos de confirmación |
+| Tecnología                   | Versión / Uso                                                                                                                     |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Svelte 5**                 | Runes (`$state`, `$derived`) — reactividad moderna                                                                                |
+| **SvelteKit 2**              | Framework full-stack, SSR deshabilitado (`ssr=false`) por auth en localStorage; PWA con service worker nativo (`$service-worker`) |
+| **Tailwind CSS v4**          | Estilos con tokens de marca en `src/routes/layout.css` (`@theme`)                                                                 |
+| **TypeScript**               | Tipado estricto                                                                                                                   |
+| **Lucide Icons**             | Iconografía (`@lucide/svelte`)                                                                                                    |
+| **Vite 8**                   | Bundler y dev server                                                                                                              |
+| **Vitest + Testing Library** | Tests unitarios, de componentes y de pantallas (`jsdom`)                                                                          |
+| **SweetAlert2**              | Diálogos de confirmación                                                                                                          |
 
 ---
 
