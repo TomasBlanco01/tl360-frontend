@@ -147,7 +147,14 @@
 <!-- Publicidades destacadas -->
 {#if publicidades.items.length > 0}
 	<section class="mx-auto max-w-6xl px-4 pt-10">
-		<h2 class="mb-5 text-xl font-bold text-gray-800 dark:text-gray-100">Destacados</h2>
+		<div class="mb-5 flex flex-wrap items-center justify-between gap-2">
+			<h2 class="text-xl font-bold text-gray-800 dark:text-gray-100">Destacados</h2>
+			<a
+				href="/publicitar"
+				class="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400"
+				>Difundí tu evento o colecta →</a
+			>
+		</div>
 		<PublicidadCarousel items={publicidades.items} />
 	</section>
 {/if}

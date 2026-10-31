@@ -77,6 +77,26 @@ describe('a11y: PublicidadCarousel', () => {
 		expect(screen.getByRole('button', { name: 'Siguiente publicidad' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Ir a la publicidad 1' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Ir a la publicidad 2' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Compartir publicidad: Uno' })).toBeInTheDocument();
+	});
+
+	it('una colecta sin comercio no enlaza a una ficha y se puede compartir', () => {
+		render(PublicidadCarousel, {
+			items: [
+				{
+					id: 'colecta',
+					empresa_id: null,
+					titulo: 'Colecta del barrio',
+					descripcion: 'Ayudanos con alimentos',
+					imagen_url: ''
+				}
+			]
+		});
+		expect(screen.getByText('Evento o colecta solidaria')).toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: /Ver comercio/ })).not.toBeInTheDocument();
+		expect(
+			screen.getByRole('button', { name: 'Compartir publicidad: Colecta del barrio' })
+		).toBeInTheDocument();
 	});
 
 	it('las imagenes informativas tienen alt (las decorativas usan gradiente sin img)', () => {

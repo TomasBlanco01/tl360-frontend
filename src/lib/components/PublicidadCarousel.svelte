@@ -5,6 +5,7 @@
 	import { browser } from '$app/environment';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Share2 from '@lucide/svelte/icons/share-2';
 
 	let { items }: { items: Publicidad[] } = $props();
 
@@ -155,6 +156,31 @@
 		return h;
 	}
 
+	/** URL para compartir: la ficha del comercio o la portada si es una colecta de la plataforma. */
+	function enlacePublicidad(pub: Publicidad) {
+		const ruta =
+			pub.empresa_id != null ? urlEmpresa({ id: pub.empresa_id, slug: pub.empresa_slug }) : '/';
+		return new URL(ruta, window.location.origin).href;
+	}
+
+	async function compartir(pub: Publicidad) {
+		const url = enlacePublicidad(pub);
+		const texto = pub.descripcion ? `${pub.titulo} — ${pub.descripcion}` : pub.titulo;
+		if (typeof navigator !== 'undefined' && navigator.share) {
+			try {
+				await navigator.share({ title: pub.titulo, text: texto, url });
+			} catch {
+				// La persona canceló el diálogo nativo: no hay nada que hacer.
+			}
+			return;
+		}
+		window.open(
+			`https://wa.me/?text=${encodeURIComponent(`${texto} ${url}`)}`,
+			'_blank',
+			'noopener,noreferrer'
+		);
+	}
+
 	/** Gradiente vibrante tipo Obscura Visuals, para publicidades sin imagen cargada. */
 	function gradienteObscura(seed: string) {
 		const h = hashSeed(seed || 'tl360');
@@ -222,15 +248,35 @@
 								{pub.descripcion}
 							</p>
 							{#if esActiva}
-								<a
-									href={urlEmpresa({
-										id: pub.empresa_id,
-										slug: pub.empresa_slug
-									})}
-									class="mt-2 inline-block text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400"
-								>
-									Ver comercio →
-								</a>
+								<div class="mt-2 flex items-center justify-between gap-2">
+									{#if pub.empresa_id != null}
+										<a
+											href={urlEmpresa({
+												id: pub.empresa_id,
+												slug: pub.empresa_slug
+											})}
+											class="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400"
+										>
+											Ver comercio →
+										</a>
+									{:else}
+										<span class="text-xs font-semibold text-gray-500 dark:text-gray-400">
+											Evento o colecta solidaria
+										</span>
+									{/if}
+									<button
+										type="button"
+										class="inline-flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+										aria-label="Compartir publicidad: {pub.titulo}"
+										onclick={(e) => {
+											e.stopPropagation();
+											compartir(pub);
+										}}
+									>
+										<Share2 class="h-3.5 w-3.5" />
+										Compartir
+									</button>
+								</div>
 							{/if}
 						</div>
 					</div>

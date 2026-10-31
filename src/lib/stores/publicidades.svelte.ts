@@ -40,7 +40,7 @@ const SEED_MOCK: Publicidad[] = [
 		empresa_id: 19,
 		titulo: 'Estudio Om Yoga',
 		descripcion: 'Clase de prueba sin cargo',
-		imagen_url: ''
+		imagen_url: 'https://picsum.photos/seed/ad-yoga/480/320'
 	},
 	{
 		id: 'seed-5',
@@ -82,7 +82,14 @@ const SEED_MOCK: Publicidad[] = [
 		empresa_id: 53,
 		titulo: 'Veterinaria San Roque',
 		descripcion: 'Campaña de vacunación antirrábica gratuita',
-		imagen_url: ''
+		imagen_url: 'https://picsum.photos/seed/ad-veterinaria/480/320'
+	},
+	{
+		id: 'seed-colecta',
+		empresa_id: null,
+		titulo: 'Colecta para el hospital',
+		descripcion: 'Juntamos insumos para la sala pediátrica: sumate hasta el viernes',
+		imagen_url: 'https://picsum.photos/seed/ad-colecta/480/320'
 	}
 ];
 
