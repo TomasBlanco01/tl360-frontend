@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Sin conexión — TL360</title>
+		<meta name="theme-color" content="#5e35b1" />
+		<style>
+			:root {
+				color-scheme: light dark;
+				--brand: #5e35b1;
+				--brand-soft: #f3e7ff;
+				--text: #1f2937;
+				--muted: #6b7280;
+				--fondo: #ffffff;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--text: #f3f4f6;
+					--muted: #9ca3af;
+					--fondo: #030712;
+					--brand-soft: #2e1065;
+				}
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				min-height: 100vh;
+				display: grid;
+				place-items: center;
+				padding: 24px;
+				background: var(--fondo);
+				color: var(--text);
+				font-family:
+					Inter,
+					system-ui,
+					-apple-system,
+					'Segoe UI',
+					sans-serif;
+			}
+			main {
+				max-width: 420px;
+				text-align: center;
+			}
+			.emoji {
+				display: inline-grid;
+				place-items: center;
+				width: 72px;
+				height: 72px;
+				border-radius: 999px;
+				background: var(--brand-soft);
+				font-size: 34px;
+			}
+			h1 {
+				margin: 20px 0 8px;
+				font-size: 1.5rem;
+			}
+			p {
+				margin: 0 0 24px;
+				line-height: 1.55;
+				color: var(--muted);
+			}
+			.acciones {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 10px;
+				justify-content: center;
+			}
+			a,
+			button {
+				border: 0;
+				border-radius: 999px;
+				padding: 11px 20px;
+				font: inherit;
+				font-weight: 600;
+				cursor: pointer;
+				text-decoration: none;
+			}
+			button {
+				background: var(--brand);
+				color: #fff;
+			}
+			a {
+				background: var(--brand-soft);
+				color: var(--brand);
+			}
+			@media (prefers-color-scheme: dark) {
+				a {
+					color: #d8b4fe;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<span class="emoji" aria-hidden="true">📡</span>
+			<h1>Estás sin conexión</h1>
+			<p>
+				No pudimos cargar esta página. Revisá tu conexión y volvé a intentar; las páginas que ya
+				visitaste pueden seguir disponibles.
+			</p>
+			<div class="acciones">
+				<button type="button" onclick="location.reload()">Reintentar</button>
+				<a href="/">Ir a la portada</a>
+				<a href="/comercios">Ver comercios</a>
+			</div>
+		</main>
+	</body>
+</html>

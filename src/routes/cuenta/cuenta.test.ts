@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { goto } from '$app/navigation';
 import { ApiError, api } from '$lib/api';
+import { activar, desactivar, detectarEstado } from '$lib/push';
 import { auth } from '$lib/stores/auth.svelte';
 import { favoritos } from '$lib/stores/favoritos.svelte';
 import type { MiTurno } from '$lib/types';
@@ -17,22 +18,39 @@ vi.mock('$lib/api', async (original) => {
 	};
 });
 
+vi.mock('$lib/push', () => ({
+	detectarEstado: vi.fn(),
+	activar: vi.fn(),
+	desactivar: vi.fn()
+}));
+
 const get = api.get as ReturnType<typeof vi.fn>;
 const borrar = api.delete as ReturnType<typeof vi.fn>;
 const put = api.put as ReturnType<typeof vi.fn>;
+const detectar = detectarEstado as ReturnType<typeof vi.fn>;
+const activarPush = activar as ReturnType<typeof vi.fn>;
+const desactivarPush = desactivar as ReturnType<typeof vi.fn>;
 
 const ana = { id: 3, nombre: 'Ana Pérez', email: 'ana@test.com', rol: 'cliente' as const };
+
+/** Fecha local a `dias` de hoy (positivo = futuro), en formato ISO corto. */
+function iso(dias: number): string {
+	const d = new Date();
+	d.setDate(d.getDate() + dias);
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const turnos = [
 	{
 		id: 10,
-		fecha: '2026-10-13',
+		fecha: iso(3),
 		hora: '10:00:00',
 		estado: 'confirmado',
 		empresa_nombre: 'Peluquería Central'
 	},
 	{
 		id: 11,
-		fecha: '2026-10-14',
+		fecha: iso(4),
 		hora: '16:30:00',
 		estado: 'confirmado',
 		empresa_nombre: 'Odontólogo Ruiz'
@@ -42,6 +60,7 @@ const turnos = [
 function backend(mios: MiTurno[] = turnos) {
 	get.mockImplementation(async (url: string) => {
 		if (url === '/turnos/mis-turnos') return mios;
+		if (url === '/usuarios/yo/recordatorio') return { horas: 24 };
 		const m = url.match(/^\/empresas\/(\d+)$/);
 		if (m) return empresa({ id: Number(m[1]), nombre: `Favorito ${m[1]}` });
 		return [];
@@ -52,6 +71,9 @@ beforeEach(() => {
 	get.mockReset();
 	borrar.mockReset().mockResolvedValue({});
 	put.mockReset().mockResolvedValue({});
+	detectar.mockReset().mockResolvedValue('no-soportado');
+	activarPush.mockReset().mockResolvedValue(undefined);
+	desactivarPush.mockReset().mockResolvedValue(undefined);
 	auth.login('tok', ana);
 	favoritos.ids = [];
 	backend();
@@ -164,7 +186,7 @@ describe('Mi cuenta', () => {
 			backend([
 				{
 					id: 10,
-					fecha: '2026-10-13',
+					fecha: iso(5),
 					hora: '10:00:00',
 					estado: 'confirmado',
 					empresa_nombre: 'Futura',
@@ -177,7 +199,8 @@ describe('Mi cuenta', () => {
 					hora: '10:00:00',
 					estado: 'confirmado',
 					empresa_nombre: 'Vieja',
-					empresa_id: 6
+					empresa_id: 6,
+					calificado: false
 				}
 			]);
 			render(Cuenta);
@@ -190,6 +213,101 @@ describe('Mi cuenta', () => {
 			await userEvent.click(screen.getByRole('button', { name: /Turnos pasados/ }));
 			expect(await screen.findByText('Vieja')).toBeInTheDocument();
 			expect(screen.queryByText('Futura')).not.toBeInTheDocument();
+		});
+
+		it('un turno pasado sin calificar enlaza al formulario y uno calificado lo indica (RF-13)', async () => {
+			backend([
+				{
+					id: 12,
+					fecha: '2020-01-01',
+					hora: '10:00:00',
+					estado: 'confirmado',
+					empresa_nombre: 'Para calificar',
+					empresa_id: 7,
+					calificado: false
+				},
+				{
+					id: 13,
+					fecha: '2020-01-02',
+					hora: '11:00:00',
+					estado: 'confirmado',
+					empresa_nombre: 'Ya calificada',
+					empresa_id: 8,
+					calificado: true
+				},
+				{
+					id: 14,
+					fecha: '2020-01-03',
+					hora: '12:00:00',
+					estado: 'cancelado',
+					empresa_nombre: 'Cancelada',
+					empresa_id: 9,
+					calificado: false
+				}
+			]);
+			render(Cuenta);
+			await userEvent.click(await screen.findByRole('button', { name: /Turnos pasados/ }));
+			expect(await screen.findByRole('link', { name: 'Calificar' })).toHaveAttribute(
+				'href',
+				'/comercios/7#opiniones'
+			);
+			expect(screen.getByText('Calificado')).toBeInTheDocument();
+			expect(screen.getAllByRole('link', { name: 'Calificar' })).toHaveLength(1);
+			expect(screen.getByText('Cancelado')).toBeInTheDocument();
+			expect(screen.getAllByText('Confirmado')).toHaveLength(2);
+		});
+	});
+
+	describe('notificaciones push (RNF-04)', () => {
+		it('si el navegador no las soporta no muestra la tarjeta', async () => {
+			render(Cuenta);
+			await screen.findByText('Peluquería Central');
+			expect(screen.queryByText('Notificaciones')).not.toBeInTheDocument();
+		});
+
+		it('permite activarlas y refleja el estado', async () => {
+			detectar.mockResolvedValueOnce('desactivado');
+			render(Cuenta);
+			await userEvent.click(await screen.findByRole('button', { name: 'Activar notificaciones' }));
+			await vi.waitFor(() => expect(activarPush).toHaveBeenCalled());
+			expect(await screen.findByText('Activadas en este dispositivo.')).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Desactivar notificaciones' })).toBeInTheDocument();
+		});
+
+		it('si ya están activas permite desactivarlas', async () => {
+			detectar.mockResolvedValueOnce('activo');
+			render(Cuenta);
+			await userEvent.click(
+				await screen.findByRole('button', { name: 'Desactivar notificaciones' })
+			);
+			await vi.waitFor(() => expect(desactivarPush).toHaveBeenCalled());
+			expect(
+				await screen.findByRole('button', { name: 'Activar notificaciones' })
+			).toBeInTheDocument();
+		});
+
+		it('explica cuando el navegador las bloqueó', async () => {
+			detectar.mockResolvedValueOnce('bloqueado');
+			render(Cuenta);
+			expect(await screen.findByText(/El navegador las bloqueó/)).toBeInTheDocument();
+			expect(
+				screen.queryByRole('button', { name: 'Activar notificaciones' })
+			).not.toBeInTheDocument();
+		});
+
+		it('carga y guarda la anticipación del recordatorio (RF-03)', async () => {
+			detectar.mockResolvedValueOnce('activo');
+			render(Cuenta);
+			const selector = await screen.findByLabelText(/Anticipación del recordatorio/);
+			expect(selector).toHaveValue('24');
+			await userEvent.selectOptions(selector, '1');
+			await userEvent.click(screen.getByRole('button', { name: 'Guardar recordatorio' }));
+			await vi.waitFor(() =>
+				expect(put).toHaveBeenCalledWith('/usuarios/yo/recordatorio', { horas: 1 })
+			);
+			expect(
+				await screen.findByText('Anticipación del recordatorio actualizada.')
+			).toBeInTheDocument();
 		});
 	});
 
@@ -219,9 +337,7 @@ describe('Mi cuenta', () => {
 				)
 			);
 			expect(auth.user?.nombre).toBe('Ana Nueva');
-			expect(
-				await screen.findByText('Datos actualizados correctamente.')
-			).toBeInTheDocument();
+			expect(await screen.findByText('Datos actualizados correctamente.')).toBeInTheDocument();
 		});
 
 		it('cambiar contraseña avisa si no coinciden', async () => {
@@ -245,9 +361,7 @@ describe('Mi cuenta', () => {
 			await userEvent.type(screen.getByLabelText(/Nueva contraseña/), 'Nueva1234');
 			await userEvent.type(screen.getByLabelText(/Confirmar nueva/), 'Nueva1234');
 			await userEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
-			expect(
-				await screen.findByText('Contraseña actualizada correctamente.')
-			).toBeInTheDocument();
+			expect(await screen.findByText('Contraseña actualizada correctamente.')).toBeInTheDocument();
 		});
 	});
 });

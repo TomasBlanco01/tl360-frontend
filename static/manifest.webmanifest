@@ -1,0 +1,33 @@
+{
+	"name": "TL360 — Comercios de Trenque Lauquen",
+	"short_name": "TL360",
+	"description": "Directorio de comercios y servicios de Trenque Lauquen: reservá turnos online y contactá directo por llamada o WhatsApp.",
+	"lang": "es-AR",
+	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"orientation": "portrait-primary",
+	"background_color": "#ffffff",
+	"theme_color": "#5e35b1",
+	"categories": ["shopping", "lifestyle"],
+	"icons": [
+		{
+			"src": "/icons/icon-192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icons/icon-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icons/icon-maskable-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	]
+}

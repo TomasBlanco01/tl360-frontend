@@ -84,6 +84,16 @@ describe('api (backend real)', () => {
 		expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
 	});
 
+	it('DELETE puede mandar un cuerpo JSON (baja de suscripción push)', async () => {
+		responder(204);
+		const { api } = await cargar();
+		await api.delete('/push/suscripciones', { endpoint: 'https://fcm.googleapis.com/x' });
+		expect(fetchMock.mock.calls[0][1].body).toBe(
+			JSON.stringify({ endpoint: 'https://fcm.googleapis.com/x' })
+		);
+		expect(fetchMock.mock.calls[0][1].headers.get('Content-Type')).toBe('application/json');
+	});
+
 	it('devuelve el JSON de la respuesta', async () => {
 		responder(200, [{ id: 1 }]);
 		const { api } = await cargar();
