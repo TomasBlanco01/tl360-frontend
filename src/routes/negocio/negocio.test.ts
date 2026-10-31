@@ -463,6 +463,84 @@ describe('Turnos recibidos', () => {
 			await screen.findByText('No podés editar una empresa que no es tuya')
 		).toBeInTheDocument();
 	});
+
+	it('muestra el correo de contacto y marca los turnos agendados por el comercio', async () => {
+		backend({
+			turnos: [
+				{ ...turnos[0], cliente_email: 'martina@test.com', sin_cuenta: false },
+				{ ...turnos[1], cliente_email: null, sin_cuenta: true }
+			]
+		});
+		render(Negocio);
+		await screen.findByText('Martina Gómez');
+		expect(screen.getByRole('link', { name: 'martina@test.com' })).toHaveAttribute(
+			'href',
+			'mailto:martina@test.com'
+		);
+		const lucas = screen.getByText('Lucas Pérez').closest('p')!;
+		expect(within(lucas).getByText('Agendado por el comercio')).toBeInTheDocument();
+		const martina = screen.getByText('Martina Gómez').closest('p')!;
+		expect(within(martina).queryByText('Agendado por el comercio')).not.toBeInTheDocument();
+	});
+
+	describe('agendar un turno sin cuenta (RF-04)', () => {
+		async function abrirFormulario() {
+			render(Negocio);
+			await screen.findByText('Todavía no recibiste turnos');
+			await userEvent.click(screen.getByRole('button', { name: '+ Agendar un turno' }));
+		}
+
+		it('exige hora y nombre, y valida el correo', async () => {
+			await abrirFormulario();
+			expect(screen.getByLabelText(/^Fecha/)).toHaveValue(hoyISO());
+			await userEvent.click(screen.getByRole('button', { name: 'Agendar turno' }));
+			expect(await screen.findAllByText('Este campo es obligatorio')).toHaveLength(2);
+			await userEvent.type(screen.getByLabelText(/Nombre de quien viene/), 'Carlos');
+			fireEvent.input(screen.getByLabelText(/^Hora/), { target: { value: '10:30' } });
+			await userEvent.type(screen.getByLabelText(/Correo electrónico/), 'carlos@');
+			await userEvent.click(screen.getByRole('button', { name: 'Agendar turno' }));
+			expect(await screen.findByText('Ingresá un correo electrónico válido')).toBeInTheDocument();
+			expect(post).not.toHaveBeenCalled();
+		});
+
+		it('agenda el turno, cierra el formulario y recarga la agenda', async () => {
+			post.mockResolvedValue({ id: 99 });
+			await abrirFormulario();
+			fireEvent.input(screen.getByLabelText(/^Fecha/), { target: { value: '2030-01-08' } });
+			fireEvent.input(screen.getByLabelText(/^Hora/), { target: { value: '10:30' } });
+			await userEvent.type(screen.getByLabelText(/Nombre de quien viene/), ' Carlos Medina ');
+			await userEvent.type(screen.getByLabelText(/Correo electrónico/), 'carlos@ejemplo.com');
+			await userEvent.click(screen.getByRole('button', { name: 'Agendar turno' }));
+			await vi.waitFor(() =>
+				expect(post).toHaveBeenCalledWith('/empresas/2700/turnos', {
+					fecha: '2030-01-08',
+					hora: '10:30',
+					cliente_nombre: 'Carlos Medina',
+					cliente_email: 'carlos@ejemplo.com'
+				})
+			);
+			await vi.waitFor(() =>
+				expect(get.mock.calls.filter((c) => c[0] === '/empresas/2700/turnos')).toHaveLength(2)
+			);
+			expect(screen.queryByRole('button', { name: 'Agendar turno' })).not.toBeInTheDocument();
+		});
+
+		it('sin correo lo manda vacío y, si el horario está tomado, conserva el formulario', async () => {
+			post.mockRejectedValue(new ApiError(409, 'Turno ya ocupado'));
+			await abrirFormulario();
+			fireEvent.input(screen.getByLabelText(/^Hora/), { target: { value: '09:00' } });
+			await userEvent.type(screen.getByLabelText(/Nombre de quien viene/), 'Lucía');
+			await userEvent.click(screen.getByRole('button', { name: 'Agendar turno' }));
+			await vi.waitFor(() =>
+				expect(post).toHaveBeenCalledWith(
+					'/empresas/2700/turnos',
+					expect.objectContaining({ cliente_nombre: 'Lucía', cliente_email: undefined })
+				)
+			);
+			expect(screen.getByRole('button', { name: 'Agendar turno' })).toBeInTheDocument();
+			expect(screen.getByLabelText(/Nombre de quien viene/)).toHaveValue('Lucía');
+		});
+	});
 });
 
 describe('Publicidades', () => {
@@ -557,6 +635,22 @@ describe('vista inicial y verificación', () => {
 		expect(screen.getByLabelText(/¿Cómo te contactan/)).toBeInTheDocument();
 		expect(screen.getByLabelText(/CUIT \(11 dígitos\)/)).toBeInTheDocument();
 		expect(screen.getByText(/Ubicación en el mapa/)).toBeInTheDocument();
+	});
+
+	it('si rechazaron la verificación muestra el motivo (RF-15)', async () => {
+		backend({
+			comercio: {
+				...propia,
+				verificado_estado: 'rechazado',
+				motivo_rechazo: 'La constancia está vencida'
+			}
+		});
+		render(Negocio);
+		await abrirFicha();
+		expect(screen.getByText('Verificación rechazada')).toBeInTheDocument();
+		expect(screen.getByRole('status')).toHaveTextContent(
+			/Motivo del rechazo: La constancia está vencida/
+		);
 	});
 });
 

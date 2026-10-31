@@ -458,6 +458,77 @@ describe('mock: atenciones de mostrador (RF-04)', () => {
 	});
 });
 
+describe('mock: rechazo de verificación con motivo (RF-15)', () => {
+	it('rechazar exige motivo, lo guarda y una nueva solicitud lo limpia', async () => {
+		const { llamar } = await nuevo();
+		const sinMotivo = await llamar('PUT', '/empresas/1/verificacion', { accion: 'rechazar' });
+		expect(sinMotivo.status).toBe(400);
+		const ok = await llamar('PUT', '/empresas/1/verificacion', {
+			accion: 'rechazar',
+			motivo: 'Constancia vencida'
+		});
+		expect(ok.data.verificado_estado).toBe('rechazado');
+		expect((await llamar('GET', '/empresas/1')).data.motivo_rechazo).toBe('Constancia vencida');
+		await llamar('PUT', '/empresas/1/verificacion', { accion: 'solicitar', cuit: '20123456786' });
+		const ficha = (await llamar('GET', '/empresas/1')).data;
+		expect(ficha.verificado_estado).toBe('pendiente');
+		expect(ficha.verificado).toBe(false);
+		expect(ficha.motivo_rechazo).toBeUndefined();
+	});
+});
+
+describe('mock: turnos agendados por el comercio (RF-04)', () => {
+	it('agenda para alguien sin cuenta, ocupa el horario y se puede cancelar', async () => {
+		const { llamar } = await nuevo();
+		const fecha = sumarDias(hoyISO(), 5);
+		expect(
+			(await llamar('POST', '/empresas/1/turnos', { fecha, hora: '10:00', cliente_nombre: ' ' }))
+				.status
+		).toBe(400);
+		const creado = await llamar('POST', '/empresas/1/turnos', {
+			fecha,
+			hora: '10:00',
+			cliente_nombre: 'Carlos Medina',
+			cliente_email: 'carlos@ejemplo.com'
+		});
+		expect(creado.status).toBe(201);
+		const lista = (await llamar('GET', '/empresas/1/turnos')).data;
+		expect(lista).toContainEqual(
+			expect.objectContaining({
+				id: creado.data.id,
+				cliente_nombre: 'Carlos Medina',
+				cliente_email: 'carlos@ejemplo.com',
+				sin_cuenta: true
+			})
+		);
+		// El mismo horario ya no se puede reservar ni volver a agendar.
+		expect(
+			(await llamar('POST', '/turnos/reservar', { empresa_id: 1, fecha, hora: '10:00' })).status
+		).toBe(409);
+		await llamar('DELETE', `/turnos/cancelar/${creado.data.id}`);
+		expect(
+			(await llamar('POST', '/turnos/reservar', { empresa_id: 1, fecha, hora: '10:00' })).status
+		).toBe(201);
+	});
+
+	it('las reservas del cliente demo llegan al comercio con nombre y correo', async () => {
+		const { llamar } = await nuevo();
+		await llamar('POST', '/turnos/reservar', {
+			empresa_id: 1,
+			fecha: sumarDias(hoyISO(), 5),
+			hora: '11:00'
+		});
+		const turno = (await llamar('GET', '/empresas/1/turnos')).data.find(
+			(t: { hora: string }) => t.hora === '11:00'
+		);
+		expect(turno).toMatchObject({
+			cliente_nombre: 'Martina Gómez',
+			cliente_email: 'cliente@demo.com',
+			sin_cuenta: false
+		});
+	});
+});
+
 describe('mock: rutas desconocidas', () => {
 	it('responden 404 indicando método y ruta', async () => {
 		const { llamar } = await nuevo();

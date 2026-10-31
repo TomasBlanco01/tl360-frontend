@@ -231,6 +231,8 @@ let nextAtencionId = 3;
 let nextCategoriaId = categorias.length + 1;
 let nextEmpresaId = empresas.length + 1;
 let nextTurnoId = 1;
+// RF-04: turnos que el comercio agenda a mano para alguien sin cuenta.
+let turnosAgendados: (TurnoRecibido & { empresa_id: number })[] = [];
 let nextUsuarioId = 1010;
 let horasRecordatorioMock = 24;
 
@@ -490,9 +492,53 @@ export async function mockFetch(path: string, options: RequestInit = {}): Promis
 	if (method === 'GET' && (m = pathname.match(/^\/empresas\/([^/]+)\/turnos$/))) {
 		const e = buscarEmpresa(m[1]);
 		if (!e) return errorJson(404, 'Empresa no encontrada');
-		const reales = turnos.filter((t) => t.empresa_id === e.id);
-		// Solo lectura de ejemplo para el visor del admin; las reservas reales van por /turnos.
-		return json(reales.length > 0 ? reales : turnosDemo());
+		// Las reservas del modo mock son del cliente demo: se informan con su nombre y correo
+		// (antes salían sin cliente_nombre y el aviso de cancelar mostraba "undefined").
+		const reales: TurnoRecibido[] = turnos
+			.filter((t) => t.empresa_id === e.id)
+			.map((t) => ({
+				id: t.id,
+				fecha: t.fecha,
+				hora: t.hora,
+				estado: t.estado,
+				cliente_nombre: usuariosSeed.cliente.nombre,
+				cliente_email: usuariosSeed.cliente.email,
+				sin_cuenta: false
+			}));
+		const agendados = turnosAgendados
+			.filter((t) => t.empresa_id === e.id && t.estado !== 'cancelado')
+			.map(({ empresa_id: _omit, ...t }) => t);
+		const lista = [...reales, ...agendados].sort((a, b) =>
+			`${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`)
+		);
+		// Sin turnos propios, se muestran unos de ejemplo para que la solapa no quede vacía.
+		return json(lista.length > 0 ? lista : turnosDemo());
+	}
+	if (method === 'POST' && (m = pathname.match(/^\/empresas\/([^/]+)\/turnos$/))) {
+		const e = buscarEmpresa(m[1]);
+		if (!e) return errorJson(404, 'Empresa no encontrada');
+		const nombre = String(body.cliente_nombre ?? '').trim();
+		const { fecha, hora } = body;
+		if (!fecha || !hora) return errorJson(400, 'Indicá la fecha y la hora del turno');
+		if (!nombre) return errorJson(400, 'El nombre es obligatorio (hasta 100 caracteres)');
+		const key = `${e.id}_${fecha}`;
+		if ((ocupados[key] ?? []).includes(hora)) return errorJson(409, 'Turno ya ocupado');
+		ocupados[key] = [...(ocupados[key] ?? []), hora];
+		const id = nextTurnoId++;
+		turnosAgendados = [
+			...turnosAgendados,
+			{
+				id,
+				empresa_id: e.id,
+				fecha,
+				hora,
+				estado: 'confirmado',
+				cliente_nombre: nombre,
+				cliente_email: String(body.cliente_email ?? '').trim() || null,
+				sin_cuenta: true
+			}
+		];
+		return json({ id, message: 'Turno agendado correctamente' }, 201);
 	}
 
 	// ---------- RF-04: atenciones sin reserva (walk-ins) ----------
@@ -637,15 +683,24 @@ export async function mockFetch(path: string, options: RequestInit = {}): Promis
 		if (accion === 'aprobar') {
 			e.verificado = true;
 			e.verificado_estado = 'verificado';
+			delete e.motivo_rechazo;
 		} else if (accion === 'rechazar') {
+			// RF-15: igual que el backend, rechazar exige un motivo de 5 a 500 caracteres.
+			const motivo = String(body.motivo ?? '').trim();
+			if (motivo.length < 5 || motivo.length > 500) {
+				return errorJson(400, 'Indicá el motivo del rechazo (entre 5 y 500 caracteres)');
+			}
 			e.verificado = false;
 			e.verificado_estado = 'rechazado';
+			e.motivo_rechazo = motivo;
 		} else {
-			// solicitar / re-solicitar: guarda CUIT + constancia si vienen
+			// solicitar / re-solicitar: guarda CUIT + constancia si vienen y vuelve a revisión.
 			if (body.cuit !== undefined) e.cuit = String(body.cuit).replace(/\D/g, '');
 			if (body.constancia_cuit_url !== undefined)
 				e.constancia_cuit_url = body.constancia_cuit_url || undefined;
+			e.verificado = false;
 			e.verificado_estado = 'pendiente';
+			delete e.motivo_rechazo;
 		}
 		return json({ verificado: e.verificado, verificado_estado: e.verificado_estado });
 	}
@@ -868,6 +923,13 @@ export async function mockFetch(path: string, options: RequestInit = {}): Promis
 	}
 	if (method === 'DELETE' && (m = pathname.match(/^\/turnos\/cancelar\/(\d+)$/))) {
 		const id = Number(m[1]);
+		const agendado = turnosAgendados.find((t) => t.id === id && t.estado !== 'cancelado');
+		if (agendado) {
+			const key = `${agendado.empresa_id}_${agendado.fecha}`;
+			ocupados[key] = (ocupados[key] ?? []).filter((h) => h !== agendado.hora);
+			agendado.estado = 'cancelado';
+			return json({ message: 'Turno cancelado correctamente' });
+		}
 		const turno = turnos.find((t) => t.id === id);
 		if (!turno) return errorJson(404, 'Turno no encontrado');
 		// 1.5 Liberación reactiva: quitar el slot del diccionario de ocupados.

@@ -49,6 +49,8 @@ export interface Empresa {
 	cuit?: string;
 	/** URL del comprobante / constancia fiscal adjuntada por el dueño. */
 	constancia_cuit_url?: string;
+	/** RF-15: por qué se rechazó la verificación (solo mientras está rechazada). */
+	motivo_rechazo?: string;
 	/** Slug SEO-friendly único (`estilo-urbano-peluqueria`). Cae a `id` si falta. */
 	slug?: string;
 	/** Coordenadas (WGS84) para el mapa; null/ausente si el comercio todavía no está geolocalizado. */
@@ -146,6 +148,10 @@ export interface TurnoRecibido {
 	hora: string;
 	estado: string;
 	cliente_nombre: string;
+	/** Canal de contacto: correo de la cuenta o el que dejó quien no tiene cuenta. */
+	cliente_email?: string | null;
+	/** true si el comercio lo agendó a mano para alguien sin cuenta. */
+	sin_cuenta?: boolean;
 }
 
 export interface LoginResponse {

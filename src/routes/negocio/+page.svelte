@@ -22,7 +22,8 @@
 		telefonoSoloDigitos,
 		caracteristicaTelefono,
 		constanciaCuit,
-		cuit
+		cuit,
+		email as emailRule
 	} from '$lib/validation';
 	import { cacheHorarios } from '$lib/horarios-cache';
 	import { DIAS_ORDEN } from '$lib/turnos';
@@ -402,6 +403,42 @@
 		recargarTurnos();
 	});
 
+	// RF-04: el comercio agenda un turno para alguien sin cuenta (por teléfono o en el local).
+	let agendando = $state(false);
+	const turnoManualVacio = () => ({ fecha: hoyISO(), hora: '', nombre: '', email: '' });
+	let turnoManual = $state(turnoManualVacio());
+	let erroresTurnoManual = $state<Record<string, string>>({});
+	let guardandoTurnoManual = $state(false);
+
+	async function agendarTurnoManual() {
+		if (!miEmpresa) return;
+		erroresTurnoManual = validateForm(turnoManual, {
+			fecha: [required()],
+			hora: [required()],
+			nombre: [required()],
+			email: [emailRule()]
+		});
+		if (Object.keys(erroresTurnoManual).length > 0) return;
+		guardandoTurnoManual = true;
+		try {
+			await api.post(`/empresas/${miEmpresa.id}/turnos`, {
+				fecha: turnoManual.fecha,
+				hora: turnoManual.hora,
+				cliente_nombre: turnoManual.nombre.trim(),
+				cliente_email: turnoManual.email.trim() || undefined
+			});
+			toast.exito('Turno agendado.');
+			turnoManual = turnoManualVacio();
+			agendando = false;
+			// Vaciar la lista alcanza: el $effect de la solapa la vuelve a pedir una sola vez.
+			turnosRecibidos = null;
+		} catch (err) {
+			toast.error(err instanceof ApiError ? err.message : 'No se pudo agendar el turno.');
+		} finally {
+			guardandoTurnoManual = false;
+		}
+	}
+
 	async function confirmarCancelarTurno() {
 		if (!turnoACancelar) return;
 		cancelandoTurno = true;
@@ -654,6 +691,16 @@
 							<Badge tone="neutral">Sin verificar</Badge>
 						{/if}
 					</div>
+					{#if estadoVerificacion === 'rechazado' && miEmpresa.motivo_rechazo}
+						<p
+							class="mb-4 rounded-lg bg-danger-50 p-3 text-sm text-danger-600 dark:bg-danger-600/10"
+							role="status"
+						>
+							<strong>Motivo del rechazo:</strong>
+							{miEmpresa.motivo_rechazo}<br />
+							Corregilo y volvé a solicitar la verificación.
+						</p>
+					{/if}
 				{/if}
 				<div class="flex flex-col gap-3">
 					<FormField label="Nombre" required bind:value={form.nombre} error={formErrors.nombre} />
@@ -1104,6 +1151,74 @@
 				</Card>
 			{/if}
 		{:else if tab === 'turnos'}
+			{#if miEmpresa}
+				<div class="mb-4">
+					{#if agendando}
+						<Card class="p-5">
+							<p class="mb-1 text-sm font-semibold text-gray-700 dark:text-gray-200">
+								Agendar un turno
+							</p>
+							<p class="mb-3 text-xs text-gray-400 dark:text-gray-500">
+								Para alguien que pidió turno por teléfono o en el local. El correo es opcional: si
+								lo cargás, le llega la confirmación.
+							</p>
+							<form
+								novalidate
+								onsubmit={(e) => {
+									e.preventDefault();
+									agendarTurnoManual();
+								}}
+								class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+							>
+								<FormField
+									label="Fecha"
+									type="date"
+									required
+									min={hoyISO()}
+									bind:value={turnoManual.fecha}
+									error={erroresTurnoManual.fecha}
+								/>
+								<FormField
+									label="Hora"
+									type="time"
+									required
+									bind:value={turnoManual.hora}
+									error={erroresTurnoManual.hora}
+								/>
+								<FormField
+									label="Nombre de quien viene"
+									required
+									bind:value={turnoManual.nombre}
+									error={erroresTurnoManual.nombre}
+								/>
+								<FormField
+									label="Correo electrónico"
+									type="email"
+									bind:value={turnoManual.email}
+									error={erroresTurnoManual.email}
+								/>
+								<div class="flex gap-2 sm:col-span-2">
+									<Button type="submit" size="sm" disabled={guardandoTurnoManual}>
+										{guardandoTurnoManual ? 'Agendando...' : 'Agendar turno'}
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="ghost"
+										onclick={() => (agendando = false)}
+									>
+										Cancelar
+									</Button>
+								</div>
+							</form>
+						</Card>
+					{:else}
+						<Button size="sm" variant="outline" onclick={() => (agendando = true)}>
+							+ Agendar un turno
+						</Button>
+					{/if}
+				</div>
+			{/if}
 			{#if !miEmpresa}
 				<EmptyState
 					title="Primero cargá tu ficha"
@@ -1161,13 +1276,26 @@
 					<div class="flex flex-col gap-3">
 						{#each turnosFiltrados as turno (turno.id)}
 							<Card class="flex items-center justify-between gap-3 p-4">
-								<div>
-									<p class="font-semibold text-gray-800 dark:text-gray-100">
+								<div class="min-w-0">
+									<p
+										class="flex flex-wrap items-center gap-2 font-semibold text-gray-800 dark:text-gray-100"
+									>
 										{turno.cliente_nombre}
+										{#if turno.sin_cuenta}
+											<Badge tone="neutral">Agendado por el comercio</Badge>
+										{/if}
 									</p>
 									<p class="text-sm text-gray-500 dark:text-gray-400">
 										{formatearFecha(turno.fecha)}
 									</p>
+									{#if turno.cliente_email}
+										<a
+											href="mailto:{turno.cliente_email}"
+											class="block truncate text-xs text-brand-600 hover:underline dark:text-brand-400"
+										>
+											{turno.cliente_email}
+										</a>
+									{/if}
 								</div>
 								<div class="flex items-center gap-3">
 									<p class="text-lg font-bold text-brand-700 dark:text-brand-400">
