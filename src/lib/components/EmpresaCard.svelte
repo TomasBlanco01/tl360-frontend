@@ -2,6 +2,7 @@
 	import type { Empresa, HorariosPorDia } from '$lib/types';
 	import { api } from '$lib/api';
 	import { estaAbiertoAhora } from '$lib/turnos';
+	import { formatearDistancia } from '$lib/geo';
 	import { cacheHorarios } from '$lib/horarios-cache';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
@@ -17,6 +18,7 @@
 	let horariosLocal = $state<HorariosPorDia | null>(null);
 
 	$effect(() => {
+		if (empresa.abierto_ahora !== undefined) return;
 		if (horariosInicial) {
 			horariosLocal = horariosInicial;
 			return;
@@ -46,7 +48,15 @@
 		};
 	});
 
-	const abierto = $derived(horariosLocal ? estaAbiertoAhora(horariosLocal) : null);
+	const abierto = $derived(
+		empresa.turnos_habilitados === false
+			? null
+			: empresa.abierto_ahora !== undefined
+				? empresa.abierto_ahora
+				: horariosLocal
+					? estaAbiertoAhora(horariosLocal)
+					: null
+	);
 	const verificado = $derived(empresa.verificado || empresa.verificado_estado === 'verificado');
 </script>
 
@@ -68,6 +78,11 @@
 				</div>
 				{#if empresa.categoria}
 					<p class="text-xs text-gray-400 dark:text-gray-500">{empresa.categoria}</p>
+				{/if}
+				{#if empresa.distancia_km != null}
+					<p class="text-xs font-semibold text-brand-600 dark:text-brand-400">
+						A {formatearDistancia(empresa.distancia_km)}
+					</p>
 				{/if}
 			</div>
 		</div>

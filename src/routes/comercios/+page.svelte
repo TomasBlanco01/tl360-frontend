@@ -13,6 +13,8 @@
 	// El catálogo real tiene miles de comercios: la búsqueda y la paginación las hace el backend.
 	const POR_PAGINA = 24;
 
+	type Ubicacion = { lat: number; lng: number };
+
 	let categorias = $state<Categoria[]>([]);
 	let empresas = $state<Empresa[]>([]);
 	let hayMas = $state(false);
@@ -22,6 +24,10 @@
 	// 2.6 El <select> trabaja con strings: normalizar a string desde el inicio.
 	let categoriaId = $state(page.url.searchParams.get('categoria') ?? '');
 	let etiquetas = $state<string[]>(parsearEtiquetasParam(page.url.searchParams.get('etiquetas')));
+	// RNF-05: la ubicación precisa vive solo en memoria; nunca se escribe en la URL.
+	let ubicacion = $state<Ubicacion | null>(null);
+	let geolocalizando = $state(false);
+	let avisoUbicacion = $state('');
 	// 2.1 Vista unificada Lista | Mapa (el mapa vive acá, no en /mapa separado).
 	let vista = $state<'lista' | 'mapa'>(
 		page.url.searchParams.get('vista') === 'mapa' ? 'mapa' : 'lista'
@@ -50,7 +56,13 @@
 			.catch((err) => console.error(err));
 	});
 
-	async function cargar(q: string, cat: string, tags: string[], reiniciar: boolean) {
+	async function cargar(
+		q: string,
+		cat: string,
+		tags: string[],
+		reiniciar: boolean,
+		geo: Ubicacion | null = ubicacion
+	) {
 		const miPedido = ++pedido;
 		cargando = true;
 		if (reiniciar) error = '';
@@ -58,6 +70,10 @@
 		if (q.trim()) params.set('q', q.trim());
 		if (cat) params.set('categoria_id', cat);
 		if (tags.length > 0) params.set('etiquetas', tags.join(','));
+		if (geo) {
+			params.set('lat', String(geo.lat));
+			params.set('lng', String(geo.lng));
+		}
 		params.set('limit', String(POR_PAGINA + 1));
 		params.set('offset', String(reiniciar ? 0 : empresas.length));
 		try {
@@ -79,7 +95,8 @@
 		const q = query;
 		const cat = categoriaId;
 		const tags = etiquetas;
-		const t = setTimeout(() => untrack(() => cargar(q, cat, [...tags], true)), 300);
+		const geo = ubicacion;
+		const t = setTimeout(() => untrack(() => cargar(q, cat, [...tags], true, geo)), 300);
 		return () => clearTimeout(t);
 	});
 
@@ -90,6 +107,34 @@
 		if (etiquetas.length > 0) params.set('etiquetas', etiquetas.join(','));
 		if (vista === 'mapa') params.set('vista', 'mapa');
 		goto(`/comercios${params.toString() ? `?${params}` : ''}`, { keepFocus: true, noScroll: true });
+	}
+
+	function pedirUbicacion() {
+		avisoUbicacion = '';
+		if (!navigator.geolocation) {
+			avisoUbicacion = 'Tu navegador no permite obtener la ubicación.';
+			return;
+		}
+		geolocalizando = true;
+		navigator.geolocation.getCurrentPosition(
+			(pos) => {
+				geolocalizando = false;
+				ubicacion = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+				aplicarFiltros();
+			},
+			() => {
+				geolocalizando = false;
+				avisoUbicacion =
+					'No pudimos obtener tu ubicación. Revisá el permiso del navegador e intentá de nuevo.';
+			},
+			{ enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 }
+		);
+	}
+
+	function quitarUbicacion() {
+		ubicacion = null;
+		avisoUbicacion = '';
+		aplicarFiltros();
 	}
 
 	function alternarEtiqueta(tag: string) {
@@ -181,6 +226,35 @@
 		</select>
 	</div>
 
+	<div class="mb-4 flex flex-wrap items-center gap-3">
+		<button
+			type="button"
+			aria-pressed={ubicacion != null}
+			disabled={geolocalizando}
+			onclick={ubicacion ? quitarUbicacion : pedirUbicacion}
+			class="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 {ubicacion
+				? 'border-brand-500 bg-brand-500 text-white'
+				: 'border-brand-500 text-brand-600 hover:bg-brand-50 dark:hover:bg-gray-800'}"
+		>
+			<span aria-hidden="true">📍</span>
+			{geolocalizando ? 'Buscando ubicación…' : ubicacion ? 'Cerca de mí (activo)' : 'Cerca de mí'}
+		</button>
+		{#if ubicacion}
+			<span class="text-xs text-gray-500 dark:text-gray-400">
+				Ordenados por cercanía; los abiertos primero.
+			</span>
+		{/if}
+	</div>
+
+	{#if avisoUbicacion}
+		<p
+			class="mb-4 rounded-lg bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+			role="alert"
+		>
+			{avisoUbicacion}
+		</p>
+	{/if}
+
 	<!-- 1.6 Filtro por etiquetas de accesibilidad y servicios -->
 	<div class="mb-6 flex flex-wrap gap-2" aria-label="Filtrar por accesibilidad y servicios">
 		{#each CATALOGO_ETIQUETAS as tag (tag)}
@@ -219,6 +293,7 @@
 			<div class="overflow-hidden rounded-card shadow-[var(--shadow-card)]">
 				<MapaComercios
 					{puntos}
+					yo={ubicacion ? [ubicacion.lat, ubicacion.lng] : null}
 					alto="h-[60vh]"
 					cargandoDatos={cargando}
 					onseleccionar={(id) => {

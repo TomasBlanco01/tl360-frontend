@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { api } from '$lib/api';
+import { goto } from '$app/navigation';
 import { empresa, setUrl } from '../../tests/helpers';
 import Comercios from './+page.svelte';
 
@@ -33,6 +34,14 @@ beforeEach(() => {
 	get.mockReset();
 	setUrl('/comercios');
 });
+
+afterEach(() => {
+	Reflect.deleteProperty(navigator, 'geolocation');
+});
+
+function conGeolocalizacion(geo: unknown) {
+	Object.defineProperty(navigator, 'geolocation', { value: geo, configurable: true });
+}
 
 describe('listado de comercios', () => {
 	it('pide la primera página al backend (24 + 1 para saber si hay más)', async () => {
@@ -122,5 +131,68 @@ describe('listado de comercios', () => {
 		await vi.waitFor(() =>
 			expect(pedidosDeEmpresas().at(-1)).toBe('/empresas?categoria_id=2&limit=25&offset=0')
 		);
+	});
+
+	it('RF-07: "Cerca de mí" pide la ubicación y ordena desde el backend', async () => {
+		conGeolocalizacion({
+			getCurrentPosition: (ok: (p: unknown) => void) =>
+				ok({ coords: { latitude: -35.9711, longitude: -62.7333 } })
+		});
+		backend((url) =>
+			url.includes('lat=')
+				? [
+						empresa({
+							id: 7,
+							nombre: 'Cerca de casa',
+							distancia_km: 0.35,
+							abierto_ahora: true
+						})
+					]
+				: lote(1, 2)
+		);
+		render(Comercios);
+		await screen.findByText('Comercio 1');
+		await userEvent.click(screen.getByRole('button', { name: 'Cerca de mí' }));
+		expect(await screen.findByText('Cerca de casa')).toBeInTheDocument();
+		expect(screen.getByText('A 350 m')).toBeInTheDocument();
+		expect(screen.getByText('Ordenados por cercanía; los abiertos primero.')).toBeInTheDocument();
+		await vi.waitFor(() =>
+			expect(pedidosDeEmpresas().at(-1)).toContain('lat=-35.9711&lng=-62.7333&limit=25&offset=0')
+		);
+	});
+
+	it('RNF-05: la ubicación del usuario no se escribe en la URL', async () => {
+		conGeolocalizacion({
+			getCurrentPosition: (ok: (p: unknown) => void) =>
+				ok({ coords: { latitude: -35.97, longitude: -62.73 } })
+		});
+		backend(() => lote(1, 1));
+		render(Comercios);
+		await screen.findByText('Comercio 1');
+		await userEvent.click(screen.getByRole('button', { name: 'Cerca de mí' }));
+		await vi.waitFor(() =>
+			expect(pedidosDeEmpresas().at(-1)).toContain('lat=-35.97&lng=-62.73')
+		);
+		const url = vi.mocked(goto).mock.lastCall?.[0] as string;
+		expect(url).not.toContain('lat=');
+		expect(url).not.toContain('lng=');
+	});
+
+	it('RF-07: si se niega el permiso lo explica sin cambiar el orden', async () => {
+		conGeolocalizacion({ getCurrentPosition: (_ok: unknown, err: () => void) => err() });
+		backend(() => lote(1, 1));
+		render(Comercios);
+		await screen.findByText('Comercio 1');
+		await userEvent.click(screen.getByRole('button', { name: 'Cerca de mí' }));
+		expect(await screen.findByRole('alert')).toHaveTextContent(/No pudimos obtener tu ubicación/);
+		expect(pedidosDeEmpresas().every((u) => !u.includes('lat='))).toBe(true);
+	});
+
+	it('RF-07: si el navegador no soporta geolocalización lo avisa', async () => {
+		backend(() => lote(1, 1));
+		render(Comercios);
+		await screen.findByText('Comercio 1');
+		await userEvent.click(screen.getByRole('button', { name: 'Cerca de mí' }));
+		expect(await screen.findByRole('alert')).toHaveTextContent(/no permite obtener la ubicación/);
 	});
 });

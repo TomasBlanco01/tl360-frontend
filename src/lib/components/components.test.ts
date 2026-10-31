@@ -52,6 +52,14 @@ describe('EmpresaCard', () => {
 		expect(screen.queryByText('Peluquerías')).not.toBeInTheDocument();
 		expect(screen.queryByText('Cortes y color')).not.toBeInTheDocument();
 	});
+
+	it('RF-07: muestra la distancia y usa el estado abierto informado por el backend', () => {
+		render(EmpresaCard, {
+			empresa: empresa({ distancia_km: 1.24, abierto_ahora: true })
+		});
+		expect(screen.getByText('A 1,2 km')).toBeInTheDocument();
+		expect(screen.getByText('● Abierto ahora')).toBeInTheDocument();
+	});
 });
 
 describe('FormField', () => {
