@@ -126,7 +126,12 @@
 			const favorito = favoritos.isFavorito(p.id);
 			const corazon = favorito ? '\u2665' : '\u2661';
 			const etiqueta = favorito ? 'Quitar de favoritos' : 'Marcar como favorito';
-			const popup = `<div style="min-width:160px"><strong>${escaparHtml(p.nombre)}</strong>${p.verificado ? ' \u2714' : ''}<br><a href="${url}">Ver ficha</a> <button type="button" data-favorito-id="${p.id}" aria-label="${etiqueta}" style="border:0;background:transparent;cursor:pointer;font-size:1.1rem;line-height:1;color:${favorito ? '#dc2626' : '#9ca3af'}">${corazon}</button></div>`;
+			// RF-10: el coraz\u00f3n solo para visitantes y clientes; el due\u00f1o o el superadmin no usan favoritos.
+			const boton =
+				!auth.user || auth.user.rol === 'cliente'
+					? ` <button type="button" data-favorito-id="${p.id}" aria-label="${etiqueta}" style="border:0;background:transparent;cursor:pointer;font-size:1.1rem;line-height:1;color:${favorito ? '#dc2626' : '#9ca3af'}">${corazon}</button>`
+					: '';
+			const popup = `<div style="min-width:160px"><strong>${escaparHtml(p.nombre)}</strong>${p.verificado ? ' \u2714' : ''}<br><a href="${url}">Ver ficha</a>${boton}</div>`;
 			const m = L!
 				.circleMarker([p.lat, p.lng], {
 					radius: 7,

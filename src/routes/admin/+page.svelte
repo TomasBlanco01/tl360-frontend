@@ -59,11 +59,39 @@
 			.finally(() => (cargandoPendientes = false));
 	}
 
-	async function resolverVerificacion(empresa: Empresa, accion: 'aprobar' | 'rechazar') {
+	// RF-15: rechazar exige un motivo (5 a 500 caracteres) que le llega al dueño.
+	let rechazandoId = $state<number | null>(null);
+	let motivoRechazo = $state('');
+	let errorMotivo = $state('');
+
+	function pedirRechazo(empresa: Empresa) {
+		rechazandoId = empresa.id;
+		motivoRechazo = '';
+		errorMotivo = '';
+	}
+
+	function confirmarRechazo(empresa: Empresa) {
+		const largo = motivoRechazo.trim().length;
+		if (largo < 5 || largo > 500) {
+			errorMotivo = 'Indicá el motivo del rechazo (entre 5 y 500 caracteres).';
+			return;
+		}
+		resolverVerificacion(empresa, 'rechazar', motivoRechazo.trim());
+	}
+
+	async function resolverVerificacion(
+		empresa: Empresa,
+		accion: 'aprobar' | 'rechazar',
+		motivo?: string
+	) {
 		procesandoId = empresa.id;
 		try {
-			await api.put(`/empresas/${empresa.id}/verificacion`, { accion });
+			await api.put(
+				`/empresas/${empresa.id}/verificacion`,
+				accion === 'rechazar' ? { accion, motivo } : { accion }
+			);
 			pendientes = pendientes.filter((p) => p.id !== empresa.id);
+			rechazandoId = null;
 			toast.exito(
 				accion === 'aprobar'
 					? `“${empresa.nombre}” verificado correctamente.`
@@ -634,7 +662,9 @@
 				{:else}
 					<ul class="flex flex-col divide-y divide-gray-100 dark:divide-gray-800">
 						{#each pendientes as comercio (comercio.id)}
-							<li class="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between">
+							<li
+								class="flex flex-col gap-2 py-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between"
+							>
 								<div class="min-w-0">
 									<a
 										href={urlEmpresa(comercio)}
@@ -669,12 +699,52 @@
 									</button>
 									<button
 										disabled={procesandoId === comercio.id}
-										onclick={() => resolverVerificacion(comercio, 'rechazar')}
+										onclick={() => pedirRechazo(comercio)}
 										class="rounded-full border border-danger-600 px-3 py-1.5 text-xs font-semibold text-danger-600 transition hover:bg-danger-50 disabled:opacity-50 dark:hover:bg-danger-600/10"
 									>
 										Rechazar
 									</button>
 								</div>
+								{#if rechazandoId === comercio.id}
+									<div class="w-full rounded-lg bg-gray-50 p-3 sm:basis-full dark:bg-gray-800/60">
+										<label
+											for="motivo-{comercio.id}"
+											class="mb-1 block text-xs font-semibold text-gray-600 dark:text-gray-300"
+										>
+											Motivo del rechazo <span class="text-danger-600">*</span>
+										</label>
+										<textarea
+											id="motivo-{comercio.id}"
+											bind:value={motivoRechazo}
+											rows="2"
+											maxlength="500"
+											placeholder="Ej.: la constancia no corresponde al CUIT declarado"
+											aria-invalid={errorMotivo ? 'true' : undefined}
+											class="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+										></textarea>
+										{#if errorMotivo}
+											<p class="mt-1 text-xs text-danger-600" role="alert">{errorMotivo}</p>
+										{/if}
+										<p class="mt-1 text-xs text-gray-400">
+											El dueño recibe este motivo por correo.
+										</p>
+										<div class="mt-2 flex gap-2">
+											<button
+												disabled={procesandoId === comercio.id}
+												onclick={() => confirmarRechazo(comercio)}
+												class="rounded-full bg-danger-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+											>
+												Confirmar rechazo
+											</button>
+											<button
+												onclick={() => (rechazandoId = null)}
+												class="px-3 py-1.5 text-xs text-gray-500 hover:underline"
+											>
+												Cancelar
+											</button>
+										</div>
+									</div>
+								{/if}
 							</li>
 						{/each}
 					</ul>

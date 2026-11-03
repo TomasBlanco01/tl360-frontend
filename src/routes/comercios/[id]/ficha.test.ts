@@ -234,6 +234,16 @@ describe('ficha del comercio', () => {
 			expect(put).not.toHaveBeenCalled();
 		});
 
+		it('el dueño de un comercio o el superadmin no ven el corazón (RF-10)', async () => {
+			for (const rol of ['admin', 'superadmin'] as const) {
+				auth.login('t', { id: 9, nombre: 'Sofía', email: 's@b.com', rol });
+				const { unmount } = render(Ficha);
+				await screen.findByRole('heading', { name: 'Estilo Urbano' });
+				expect(screen.queryByRole('button', { name: 'Marcar como favorito' })).toBeNull();
+				unmount();
+			}
+		});
+
 		it('con sesión lo marca y se ve el corazón lleno', async () => {
 			auth.login('t', { id: 3, nombre: 'Ana', email: 'a@b.com', rol: 'cliente' });
 			await cargarFicha();

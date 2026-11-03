@@ -18,9 +18,8 @@
 		{ label: 'Comercios', path: '/comercios' },
 		// 2.1 Directorio unificado: el mapa vive en /comercios?vista=mapa.
 		{ label: 'Mapa', path: '/comercios?vista=mapa' },
-		...(auth.user && !auth.isAdmin && !auth.isSuperAdmin
-			? [{ label: 'Mi Cuenta', path: '/cuenta' }]
-			: []),
+		// El dueño de comercio también edita sus datos y su contraseña desde Mi Cuenta.
+		...(auth.user && !auth.isSuperAdmin ? [{ label: 'Mi Cuenta', path: '/cuenta' }] : []),
 		...(auth.isAdmin ? [{ label: 'Mi Negocio', path: '/negocio' }] : []),
 		...(auth.isSuperAdmin ? [{ label: 'Admin', path: '/admin' }] : [])
 	] as { label: string; path: string }[]);

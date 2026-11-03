@@ -319,15 +319,18 @@
 					{/if}
 				</div>
 
-				<button
-					class="text-2xl transition {empresa && favoritos.isFavorito(empresa.id)
-						? 'text-danger-600'
-						: 'hover:text-danger-400 text-gray-300'}"
-					onclick={toggleFavorito}
-					aria-label="Marcar como favorito"
-				>
-					{empresa && favoritos.isFavorito(empresa.id) ? '♥' : '♡'}
-				</button>
+				<!-- RF-10: los favoritos son del cliente; el dueño o el superadmin no los ven. -->
+				{#if !auth.user || auth.user.rol === 'cliente'}
+					<button
+						class="text-2xl transition {empresa && favoritos.isFavorito(empresa.id)
+							? 'text-danger-600'
+							: 'hover:text-danger-400 text-gray-300'}"
+						onclick={toggleFavorito}
+						aria-label="Marcar como favorito"
+					>
+						{empresa && favoritos.isFavorito(empresa.id) ? '♥' : '♡'}
+					</button>
+				{/if}
 			</div>
 
 			{#if empresa.slogan}

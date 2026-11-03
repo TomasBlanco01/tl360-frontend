@@ -14,7 +14,7 @@
 	} from '$lib/validation';
 	import { hoyISO } from '$lib/_auditoria/fechas';
 	import { activar, desactivar, detectarEstado, type EstadoPush } from '$lib/push';
-	import type { Empresa, MiTurno } from '$lib/types';
+	import type { Empresa, MiTurno, Usuario } from '$lib/types';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -24,7 +24,18 @@
 	import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 	import FormField from '$lib/components/FormField.svelte';
 
-	let tab = $state('turnos');
+	// El dueño de comercio usa Mi cuenta solo para sus datos: turnos y favoritos son del cliente.
+	const esCliente = $derived(auth.user?.rol === 'cliente');
+	let tab = $state(auth.user && auth.user.rol !== 'cliente' ? 'datos' : 'turnos');
+	const pestanas = $derived(
+		esCliente
+			? [
+					{ id: 'turnos', label: 'Mis Turnos' },
+					{ id: 'favoritos', label: 'Favoritos' },
+					{ id: 'datos', label: 'Mis datos' }
+				]
+			: [{ id: 'datos', label: 'Mis datos' }]
+	);
 	// 2.6 Historial: próximos vs pasados dentro de "Mis Turnos".
 	let subTab = $state<'proximos' | 'pasados'>('proximos');
 	let turnos = $state<MiTurno[]>([]);
@@ -222,6 +233,7 @@
 	let erroresDatos = $state<Record<string, string>>({});
 	let guardandoDatos = $state(false);
 	let mensajeDatos = $state('');
+	let errorDatos = $state(false);
 
 	let actual = $state('');
 	let nueva = $state('');
@@ -234,6 +246,7 @@
 	async function guardarDatos() {
 		erroresDatos = {};
 		mensajeDatos = '';
+		errorDatos = false;
 		const errs = validateForm(
 			{ nombre, email },
 			{ nombre: [required()], email: [required(), emailRule()] }
@@ -244,18 +257,27 @@
 		}
 		guardandoDatos = true;
 		try {
-			try {
-				await api.put('/usuarios/yo', { nombre: nombre.trim(), email: email.trim() });
-			} catch (e) {
-				if (e instanceof ApiError && e.status !== 404) throw e;
-				// Sin endpoint: se guarda local con el store + toast.
-			}
-			auth.actualizar({ nombre: nombre.trim(), email: email.trim() });
-			mensajeDatos = 'Datos actualizados correctamente.';
-			toast.exito('Datos actualizados correctamente.');
+			const perfil = await api.put<Partial<Usuario>>('/usuarios/yo', {
+				nombre: nombre.trim(),
+				email: email.trim()
+			});
+			auth.actualizar({
+				nombre: perfil.nombre ?? nombre.trim(),
+				email: perfil.email ?? email.trim(),
+				...(perfil.email_verificado !== undefined && {
+					email_verificado: perfil.email_verificado
+				})
+			});
+			// RF-01: un correo nuevo vuelve a exigir verificación; el backend ya mandó el enlace.
+			mensajeDatos =
+				perfil.email_verificado === false
+					? 'Datos actualizados. Te enviamos un enlace para verificar tu nuevo correo.'
+					: 'Datos actualizados correctamente.';
+			toast.exito(mensajeDatos);
 		} catch (err) {
 			const msg = err instanceof ApiError ? err.message : 'No se pudieron guardar los cambios.';
 			mensajeDatos = msg;
+			errorDatos = true;
 			toast.error(msg);
 		} finally {
 			guardandoDatos = false;
@@ -280,11 +302,7 @@
 		}
 		guardandoPass = true;
 		try {
-			try {
-				await api.put('/usuarios/yo', { password_actual: actual, password_nueva: nueva });
-			} catch (e) {
-				if (e instanceof ApiError && e.status !== 404) throw e;
-			}
+			await api.put('/usuarios/yo', { password_actual: actual, password_nueva: nueva });
 			actual = '';
 			nueva = '';
 			confirmar = '';
@@ -351,51 +369,48 @@
 					{cargandoPush ? 'Activando...' : 'Activar notificaciones'}
 				</Button>
 			{/if}
-			<div class="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
-				<label
-					for="horas-recordatorio"
-					class="text-sm font-medium text-gray-700 dark:text-gray-200"
-				>
-					Anticipación del recordatorio
-				</label>
-				<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-					Elegí con cuánta anticipación querés que te avisemos antes de cada turno.
-				</p>
-				<div class="mt-2 flex flex-wrap items-end gap-2">
-					<select
-						id="horas-recordatorio"
-						bind:value={horasRecordatorio}
-						class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+			<!-- RF-03: el recordatorio es de los turnos del cliente; el dueño no reserva. -->
+			{#if esCliente}
+				<div class="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+					<label
+						for="horas-recordatorio"
+						class="text-sm font-medium text-gray-700 dark:text-gray-200"
 					>
-						{#each opcionesRecordatorio as opcion (opcion.horas)}
-							<option value={String(opcion.horas)}>{opcion.texto}</option>
-						{/each}
-					</select>
-					<Button
-						size="sm"
-						variant="outline"
-						disabled={guardandoRecordatorio}
-						onclick={guardarRecordatorio}
-					>
-						{guardandoRecordatorio ? 'Guardando...' : 'Guardar recordatorio'}
-					</Button>
-				</div>
-				{#if mensajeRecordatorio}
-					<p class="mt-2 text-sm {errorRecordatorio ? 'text-danger-600' : 'text-success-600'}">
-						{mensajeRecordatorio}
+						Anticipación del recordatorio
+					</label>
+					<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+						Elegí con cuánta anticipación querés que te avisemos antes de cada turno.
 					</p>
-				{/if}
-			</div>
+					<div class="mt-2 flex flex-wrap items-end gap-2">
+						<select
+							id="horas-recordatorio"
+							bind:value={horasRecordatorio}
+							class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+						>
+							{#each opcionesRecordatorio as opcion (opcion.horas)}
+								<option value={String(opcion.horas)}>{opcion.texto}</option>
+							{/each}
+						</select>
+						<Button
+							size="sm"
+							variant="outline"
+							disabled={guardandoRecordatorio}
+							onclick={guardarRecordatorio}
+						>
+							{guardandoRecordatorio ? 'Guardando...' : 'Guardar recordatorio'}
+						</Button>
+					</div>
+					{#if mensajeRecordatorio}
+						<p class="mt-2 text-sm {errorRecordatorio ? 'text-danger-600' : 'text-success-600'}">
+							{mensajeRecordatorio}
+						</p>
+					{/if}
+				</div>
+			{/if}
 		</Card>
 	{/if}
 
-	<Tabs
-		tabs={[
-			{ id: 'turnos', label: 'Mis Turnos' },
-			{ id: 'favoritos', label: 'Favoritos' }
-		]}
-		bind:active={tab}
-	/>
+	<Tabs tabs={pestanas} bind:active={tab} />
 
 	<div class="mt-6">
 		{#if tab === 'turnos'}
@@ -478,104 +493,106 @@
 					{/each}
 				</div>
 			{/if}
-		{:else if empresasFavoritas.length === 0}
-			<EmptyState
-				title="Todavía no tenés favoritos"
-				description="Marcá comercios con el corazón para encontrarlos rápido acá."
-			>
-				<Button href="/comercios">Explorar comercios</Button>
-			</EmptyState>
+		{:else if tab === 'favoritos'}
+			{#if empresasFavoritas.length === 0}
+				<EmptyState
+					title="Todavía no tenés favoritos"
+					description="Marcá comercios con el corazón para encontrarlos rápido acá."
+				>
+					<Button href="/comercios">Explorar comercios</Button>
+				</EmptyState>
+			{:else}
+				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+					{#each empresasFavoritas as empresa (empresa.id)}
+						<EmpresaCard {empresa} />
+					{/each}
+				</div>
+			{/if}
 		{:else}
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each empresasFavoritas as empresa (empresa.id)}
-					<EmpresaCard {empresa} />
-				{/each}
-			</div>
+			<section aria-labelledby="mis-datos">
+				<h2 id="mis-datos" class="sr-only">Mis datos</h2>
+				<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+					<Card class="p-5">
+						<h3 class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
+							Datos personales
+						</h3>
+						<form
+							novalidate
+							onsubmit={(e) => {
+								e.preventDefault();
+								guardarDatos();
+							}}
+							class="flex flex-col gap-3"
+						>
+							<FormField label="Nombre" required bind:value={nombre} error={erroresDatos.nombre} />
+							<FormField
+								label="Correo electrónico"
+								type="email"
+								required
+								bind:value={email}
+								error={erroresDatos.email}
+							/>
+							{#if mensajeDatos}
+								<p class="text-sm {errorDatos ? 'text-danger-600' : 'text-success-600'}">
+									{mensajeDatos}
+								</p>
+							{/if}
+							<div>
+								<Button type="submit" size="sm" disabled={guardandoDatos}>
+									{guardandoDatos ? 'Guardando...' : 'Guardar cambios'}
+								</Button>
+							</div>
+						</form>
+					</Card>
+					<Card class="p-5">
+						<h3 class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
+							Cambiar contraseña
+						</h3>
+						<form
+							novalidate
+							onsubmit={(e) => {
+								e.preventDefault();
+								cambiarContrasena();
+							}}
+							class="flex flex-col gap-3"
+						>
+							<FormField
+								label="Contraseña actual"
+								type="password"
+								required
+								bind:value={actual}
+								error={erroresPass.actual}
+							/>
+							<FormField
+								label="Nueva contraseña"
+								type="password"
+								required
+								bind:value={nueva}
+								error={erroresPass.nueva}
+							/>
+							<FormField
+								label="Confirmar nueva contraseña"
+								type="password"
+								required
+								bind:value={confirmar}
+								error={erroresPass.confirmar}
+							/>
+							{#if mensajePass}
+								<p class="text-sm {errorPass ? 'text-danger-600' : 'text-success-600'}">
+									{mensajePass}
+								</p>
+							{/if}
+							<div>
+								<Button type="submit" size="sm" disabled={guardandoPass}>
+									{guardandoPass ? 'Guardando...' : 'Cambiar contraseña'}
+								</Button>
+							</div>
+						</form>
+					</Card>
+				</div>
+			</section>
 		{/if}
 	</div>
-
-	<section aria-labelledby="mis-datos" class="mt-10">
-		<h2 id="mis-datos" class="mb-4 text-xl font-bold text-gray-800 dark:text-gray-100">
-			Mis datos
-		</h2>
-		<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-			<Card class="p-5">
-				<h3 class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
-					Datos personales
-				</h3>
-				<form
-					novalidate
-					onsubmit={(e) => {
-						e.preventDefault();
-						guardarDatos();
-					}}
-					class="flex flex-col gap-3"
-				>
-					<FormField label="Nombre" required bind:value={nombre} error={erroresDatos.nombre} />
-					<FormField
-						label="Correo electrónico"
-						type="email"
-						required
-						bind:value={email}
-						error={erroresDatos.email}
-					/>
-					{#if mensajeDatos}
-						<p class="text-sm text-success-600">{mensajeDatos}</p>
-					{/if}
-					<div>
-						<Button type="submit" size="sm" disabled={guardandoDatos}>
-							{guardandoDatos ? 'Guardando...' : 'Guardar cambios'}
-						</Button>
-					</div>
-				</form>
-			</Card>
-			<Card class="p-5">
-				<h3 class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-200">
-					Cambiar contraseña
-				</h3>
-				<form
-					novalidate
-					onsubmit={(e) => {
-						e.preventDefault();
-						cambiarContrasena();
-					}}
-					class="flex flex-col gap-3"
-				>
-					<FormField
-						label="Contraseña actual"
-						type="password"
-						required
-						bind:value={actual}
-						error={erroresPass.actual}
-					/>
-					<FormField
-						label="Nueva contraseña"
-						type="password"
-						required
-						bind:value={nueva}
-						error={erroresPass.nueva}
-					/>
-					<FormField
-						label="Confirmar nueva contraseña"
-						type="password"
-						required
-						bind:value={confirmar}
-						error={erroresPass.confirmar}
-					/>
-					{#if mensajePass}
-						<p class="text-sm {errorPass ? 'text-danger-600' : 'text-success-600'}">
-							{mensajePass}
-						</p>
-					{/if}
-					<div>
-						<Button type="submit" size="sm" disabled={guardandoPass}>
-							{guardandoPass ? 'Guardando...' : 'Cambiar contraseña'}
-						</Button>
-					</div>
-				</form>
-			</Card>
-		</div>
-	</section>
 </div>
 
 <ConfirmModal
