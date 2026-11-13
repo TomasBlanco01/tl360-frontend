@@ -31,10 +31,9 @@
 			return;
 		}
 		const idComercio = empresa.id;
-		const slugOId = empresa.slug || empresa.id;
 		let vivo = true;
 		api
-			.get<HorariosPorDia>(`/empresas/horarios/${slugOId}`)
+			.get<HorariosPorDia>(`/empresas/horarios/${idComercio}`)
 			.then((h) => {
 				if (!vivo) return;
 				if (h && typeof h === 'object' && !Array.isArray(h)) {
@@ -65,22 +64,24 @@
 		<div class="flex items-start gap-3">
 			<Avatar name={empresa.nombre} size={48} />
 			<div class="min-w-0 flex-1">
-				<div class="flex flex-wrap items-center gap-2">
-					<p class="truncate font-bold text-gray-800 dark:text-gray-100">{empresa.nombre}</p>
-					{#if verificado}
-						<Badge tone="brand">Verificado</Badge>
-					{/if}
-					{#if abierto === true}
-						<Badge tone="success">● Abierto ahora</Badge>
-					{:else if abierto === false}
-						<Badge tone="neutral">○ Cerrado</Badge>
-					{/if}
-				</div>
-				{#if empresa.categoria}
-					<p class="text-xs text-gray-400 dark:text-gray-500">{empresa.categoria}</p>
+				<p class="truncate font-bold text-gray-800 dark:text-gray-100">{empresa.nombre}</p>
+				{#if empresa.rubro}
+					<p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{empresa.rubro}</p>
+				{/if}
+				{#if verificado || abierto !== null}
+					<div class="mt-2 flex flex-wrap items-center gap-1.5">
+						{#if verificado}
+							<Badge tone="brand">Verificado</Badge>
+						{/if}
+						{#if abierto === true}
+							<Badge tone="success">● Abierto ahora</Badge>
+						{:else if abierto === false}
+							<Badge tone="neutral">○ Cerrado</Badge>
+						{/if}
+					</div>
 				{/if}
 				{#if empresa.distancia_km != null}
-					<p class="text-xs font-semibold text-brand-600 dark:text-brand-400">
+					<p class="mt-1.5 text-xs font-semibold text-brand-600 dark:text-brand-400">
 						A {formatearDistancia(empresa.distancia_km)}
 					</p>
 				{/if}

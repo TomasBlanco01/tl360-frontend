@@ -77,8 +77,18 @@
 	</button>
 	{#if ruta}
 		<p role="status" class="text-sm font-medium text-gray-600 dark:text-gray-300">
-			{resumenRuta(ruta)}
+			≈ {resumenRuta(ruta)}
+			<span class="font-normal text-gray-400 dark:text-gray-500">(aproximado)</span>
 		</p>
+		<!-- La estimación es de OSRM (sin tránsito): Google Maps queda a mano para el recorrido exacto. -->
+		<a
+			href={enlaceIndicaciones(destino, ruta.origen)}
+			target="_blank"
+			rel="noopener noreferrer"
+			class="inline-flex items-center gap-1 rounded-full border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+		>
+			Ver el recorrido en Google Maps ↗
+		</a>
 	{:else}
 		<a
 			href={enlaceIndicaciones(destino)}
@@ -90,6 +100,11 @@
 		</a>
 	{/if}
 </div>
+{#if ruta}
+	<p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+		Distancia y tiempo estimados por calle, sin tránsito: pueden diferir un poco de Google Maps.
+	</p>
+{/if}
 {#if error}
 	<p role="alert" class="mt-2 text-sm text-red-600 dark:text-red-400">
 		{error}

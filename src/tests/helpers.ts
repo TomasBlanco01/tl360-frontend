@@ -30,11 +30,11 @@ export function empresa(parcial: Partial<Empresa> = {}): Empresa {
 		id: 1,
 		nombre: 'Peluquería Central',
 		direccion: 'Calle 123',
-		telefono: '2392111111',
+		telefonos: [{ id: 1, numero: '2392111111', principal: true }],
 		slogan: 'Cortes y color',
-		categoria_id: 1,
-		categoria: 'Peluquerías',
-		admin_id: null,
+		rubro_id: 1,
+		rubro: 'Peluquerías',
+		usuario_id: null,
 		...parcial
 	};
 }

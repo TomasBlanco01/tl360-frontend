@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { favoritos } from '$lib/stores/favoritos.svelte';
-	import { toast } from '$lib/_auditoria/toast.svelte';
+	import { toast } from '$lib/components/toast.svelte';
 	import ThemePicker from '$lib/components/ThemePicker.svelte';
 	import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -18,8 +18,11 @@
 		{ label: 'Comercios', path: '/comercios' },
 		// 2.1 Directorio unificado: el mapa vive en /comercios?vista=mapa.
 		{ label: 'Mapa', path: '/comercios?vista=mapa' },
-		// El dueño de comercio también edita sus datos y su contraseña desde Mi Cuenta.
-		...(auth.user && !auth.isSuperAdmin ? [{ label: 'Mi Cuenta', path: '/cuenta' }] : []),
+		// RF-06: canal público para pedir la difusión de un evento o colecta.
+		...(auth.isSuperAdmin ? [] : [{ label: 'Eventos y colectas', path: '/publicitar' }]),
+		// El cliente y el superadmin editan sus datos desde Mi Cuenta; el dueño de comercio los tiene
+		// dentro de Mi Negocio (pestaña "Mi cuenta"), así tiene todo en un solo lugar.
+		...(auth.user && !auth.isAdmin ? [{ label: 'Mi Cuenta', path: '/cuenta' }] : []),
 		...(auth.isAdmin ? [{ label: 'Mi Negocio', path: '/negocio' }] : []),
 		...(auth.isSuperAdmin ? [{ label: 'Admin', path: '/admin' }] : [])
 	] as { label: string; path: string }[]);
@@ -122,7 +125,7 @@
 				{#if auth.user}
 					<li>
 						<button
-							class="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+							class="mx-4 mt-2 flex w-[calc(100%-2rem)] items-center justify-center gap-2 rounded-full border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
 							onclick={pedirSalir}
 							aria-label="Cerrar sesión"
 						>
@@ -131,17 +134,18 @@
 						</button>
 					</li>
 				{:else}
-					<li>
+					<!-- Mismos estilos que en escritorio: "Ingresar" con borde y "Registrarse" relleno. -->
+					<li
+						class="mt-2 flex flex-col gap-2 border-t border-gray-100 px-4 pt-4 dark:border-gray-800"
+					>
 						<a
 							href="/auth/login"
-							class="block px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800"
+							class="rounded-full border border-brand-500 px-4 py-2.5 text-center text-sm font-semibold text-brand-600 transition hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-gray-800"
 							onclick={() => (drawerOpen = false)}>Ingresar</a
 						>
-					</li>
-					<li>
 						<a
 							href="/auth/register"
-							class="block px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800"
+							class="rounded-full bg-brand-500 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-brand-600"
 							onclick={() => (drawerOpen = false)}>Registrarse</a
 						>
 					</li>

@@ -48,7 +48,7 @@ describe('EmpresaCard', () => {
 	});
 
 	it('oculta el rubro y el slogan si no vienen', () => {
-		render(EmpresaCard, { empresa: empresa({ categoria: undefined, slogan: '' }) });
+		render(EmpresaCard, { empresa: empresa({ rubro: undefined, slogan: '' }) });
 		expect(screen.queryByText('Peluquerías')).not.toBeInTheDocument();
 		expect(screen.queryByText('Cortes y color')).not.toBeInTheDocument();
 	});

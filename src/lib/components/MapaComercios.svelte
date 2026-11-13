@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { untrack } from 'svelte';
 	import 'leaflet/dist/leaflet.css';
 	import type { Map as LeafletMap, LayerGroup, Marker } from 'leaflet';
 	import type { PuntoMapa } from '$lib/types';
-	import { agruparPuntos, escaparHtml } from '$lib/geo';
+	import { agruparEnPantalla, dentroDeLimites, escaparHtml, type Limites } from '$lib/geo';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { favoritos } from '$lib/stores/favoritos.svelte';
 
@@ -15,6 +16,7 @@
 		yo = null,
 		alto = 'h-72',
 		onseleccionar,
+		onvisibles,
 		modoSelector = false,
 		latitud = null,
 		longitud = null,
@@ -31,6 +33,8 @@
 		ruta?: [number, number][] | null;
 		alto?: string;
 		onseleccionar?: (id: number) => void;
+		/** Ids de los puntos que quedan a la vista tras mover o hacer zoom (el listado los sigue). */
+		onvisibles?: (ids: number[]) => void;
 		modoSelector?: boolean;
 		latitud?: number | null;
 		longitud?: number | null;
@@ -39,12 +43,17 @@
 		cargandoDatos?: boolean;
 	} = $props();
 
+	/** A partir de este zoom cada comercio se dibuja en su ubicación real, sin agrupar. */
+	const ZOOM_SIN_AGRUPAR = 17;
+
 	let contenedor: HTMLDivElement | undefined = $state();
 	let mapa: LeafletMap | undefined;
 	let capa: LayerGroup | undefined;
 	let pinSelector: Marker | undefined;
 	let L: typeof import('leaflet') | undefined;
 	let listo = $state(false);
+	// Cambia con cada zoom o desplazamiento: vuelve a agrupar y a informar los visibles.
+	let vista = $state(0);
 
 	// RF-10: el corazón del popup usa el mismo store que la ficha del comercio.
 	function alternarFavoritoDesdeMapa(id: number) {
@@ -85,11 +94,12 @@
 					'&copy; colaboradores de <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 			}).addTo(mapa);
 			capa = L.layerGroup().addTo(mapa);
-			if (modoSelector && mapa && L) {
+			if (modoSelector) {
 				mapa.on('click', (e: { latlng: { lat: number; lng: number } }) => {
 					oncambio?.(e.latlng.lat, e.latlng.lng);
 				});
 			}
+			mapa.on('moveend', () => vista++);
 			listo = true;
 		});
 		return () => {
@@ -101,49 +111,114 @@
 		};
 	});
 
+	function limitesActuales(): Limites | null {
+		const b = mapa?.getBounds?.();
+		if (!b) return null;
+		return [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
+	}
+
+	// Encuadre: solo cuando cambia el conjunto de puntos (filtros nuevos), la ruta o la ubicación.
+	// No en cada zoom: si no, el mapa "saltaría" de vuelta cada vez que el usuario se acerca.
+	const claveEncuadre = $derived(
+		JSON.stringify([
+			puntos.map((p) => p.id),
+			yo,
+			ruta?.length ?? 0,
+			modoSelector ? [latitud, longitud] : null
+		])
+	);
 	$effect(() => {
+		void claveEncuadre;
+		if (!listo || !mapa) return;
+		untrack(() => {
+			const todos: [number, number][] = [
+				...puntos.map((p) => [p.lat, p.lng] as [number, number]),
+				...(yo ? [yo] : []),
+				...(ruta ?? []),
+				...(modoSelector && latitud != null && longitud != null
+					? [[latitud, longitud] as [number, number]]
+					: [])
+			];
+			if (todos.length > 1) mapa!.fitBounds(todos, { padding: [30, 30], maxZoom: 16 });
+			else if (todos.length === 1) mapa!.setView(todos[0], 16);
+			vista++;
+		});
+	});
+
+	// Marcadores: se reagrupan en cada zoom/desplazamiento (`vista`) según la distancia en pantalla.
+	$effect(() => {
+		void vista;
 		if (!listo || !L || !mapa || !capa) return;
-		const zoomActual = mapa.getZoom?.() ?? zoom;
-		const grupos = agruparPuntos(puntos, zoomActual);
-		const marcadores = grupos.flatMap((g) => {
-			if (g.items.length > 1) {
-				const m = L!
-					.circleMarker([g.lat, g.lng], {
-						radius: 12,
-						weight: 2,
-						color: '#fff',
-						fillColor: '#7e57c2',
-						fillOpacity: 0.95
-					})
-					.bindTooltip(`${g.items.length} comercios`);
-				m.on('click', () => {
-					mapa?.setView([g.lat, g.lng], Math.min((mapa?.getZoom?.() ?? zoom) + 2, 17));
-				});
-				return [m];
-			}
-			const p = g.items[0];
+		const Lf = L;
+		const m = mapa;
+		const zoomActual = m.getZoom?.() ?? zoom;
+		const grupos = agruparEnPantalla(
+			puntos,
+			(lat, lng) => m.project([lat, lng], zoomActual),
+			zoomActual >= ZOOM_SIN_AGRUPAR ? 0 : 56
+		);
+		function marcadorDe(p: PuntoMapa, pos: [number, number]) {
 			const url = `/comercios/${p.slug || p.id}`;
 			const favorito = favoritos.isFavorito(p.id);
-			const corazon = favorito ? '\u2665' : '\u2661';
+			const corazon = favorito ? '♥' : '♡';
 			const etiqueta = favorito ? 'Quitar de favoritos' : 'Marcar como favorito';
-			// RF-10: el coraz\u00f3n solo para visitantes y clientes; el due\u00f1o o el superadmin no usan favoritos.
+			// RF-10: el corazón solo para visitantes y clientes; el dueño o el superadmin no usan favoritos.
 			const boton =
 				!auth.user || auth.user.rol === 'cliente'
 					? ` <button type="button" data-favorito-id="${p.id}" aria-label="${etiqueta}" style="border:0;background:transparent;cursor:pointer;font-size:1.1rem;line-height:1;color:${favorito ? '#dc2626' : '#9ca3af'}">${corazon}</button>`
 					: '';
-			const popup = `<div style="min-width:160px"><strong>${escaparHtml(p.nombre)}</strong>${p.verificado ? ' \u2714' : ''}<br><a href="${url}">Ver ficha</a>${boton}</div>`;
-			const m = L!
-				.circleMarker([p.lat, p.lng], {
-					radius: 7,
-					weight: 2,
-					color: '#fff',
-					fillColor: '#4f46e5',
-					fillOpacity: 0.9
-				})
+			const popup = `<div style="min-width:160px"><strong>${escaparHtml(p.nombre)}</strong>${p.verificado ? ' ✔' : ''}<br><a href="${url}">Ver ficha</a>${boton}</div>`;
+			const marcador = Lf.circleMarker(pos, {
+				radius: 8,
+				weight: 2,
+				color: '#fff',
+				fillColor: '#4f46e5',
+				fillOpacity: 0.9
+			})
 				.bindTooltip(p.nombre)
 				.bindPopup(popup);
-			if (onseleccionar) m.on('click', () => onseleccionar(p.id));
-			return [m];
+			if (onseleccionar) marcador.on('click', () => onseleccionar(p.id));
+			return marcador;
+		}
+		const marcadores = grupos.map((g) => {
+			// Zoom máximo y aun así juntos: comparten la misma dirección. Se abren en abanico alrededor
+			// del punto real (unidos por una línea) para poder tocar cada uno.
+			if (g.items.length > 1 && zoomActual >= ZOOM_SIN_AGRUPAR) {
+				const centroPx = m.project([g.lat, g.lng], zoomActual);
+				const radio = 18 + g.items.length * 2;
+				return Lf.layerGroup(
+					g.items.flatMap((p, i) => {
+						const angulo = (2 * Math.PI * i) / g.items.length - Math.PI / 2;
+						const pos = m.unproject(
+							[centroPx.x + radio * Math.cos(angulo), centroPx.y + radio * Math.sin(angulo)],
+							zoomActual
+						);
+						return [
+							Lf.polyline([[g.lat, g.lng], pos], { color: '#7e57c2', weight: 1, opacity: 0.7 }),
+							marcadorDe(p, [pos.lat, pos.lng])
+						];
+					})
+				);
+			}
+			if (g.items.length > 1) {
+				const n = g.items.length;
+				const lado = n >= 100 ? 46 : n >= 10 ? 40 : 34;
+				const icono = Lf.divIcon({
+					className: '',
+					html: `<div style="width:${lado}px;height:${lado}px;border-radius:9999px;background:#7e57c2;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);color:#fff;font:600 13px/1 system-ui,sans-serif;display:flex;align-items:center;justify-content:center">${n}</div>`,
+					iconSize: [lado, lado],
+					iconAnchor: [lado / 2, lado / 2]
+				});
+				const marcador = Lf.marker([g.lat, g.lng], { icon: icono, keyboard: true }).bindTooltip(
+					`${n} comercios: acercate para verlos`
+				);
+				marcador.on('click', () => {
+					const limites = Lf.latLngBounds(g.items.map((p) => [p.lat, p.lng] as [number, number]));
+					m.fitBounds(limites, { padding: [40, 40], maxZoom: ZOOM_SIN_AGRUPAR + 1 });
+				});
+				return marcador;
+			}
+			return marcadorDe(g.items[0], [g.items[0].lat, g.items[0].lng]);
 		});
 		capa.clearLayers();
 		if (pinSelector) {
@@ -152,11 +227,11 @@
 		}
 		// RF-02: dibujar la ruta debajo de los marcadores.
 		if (ruta && ruta.length > 1) {
-			L.polyline(ruta, { color: '#5e35b1', weight: 5, opacity: 0.85 }).addTo(capa);
+			Lf.polyline(ruta, { color: '#5e35b1', weight: 5, opacity: 0.85 }).addTo(capa);
 		}
-		marcadores.forEach((m) => capa!.addLayer(m));
+		marcadores.forEach((mk) => capa!.addLayer(mk));
 		if (yo) {
-			L.circleMarker(yo, {
+			Lf.circleMarker(yo, {
 				radius: 8,
 				weight: 3,
 				color: '#fff',
@@ -168,24 +243,19 @@
 		}
 		// 1.3 Pin del dueño: arrastrable + se reubica al hacer clic en el mapa.
 		if (modoSelector && latitud != null && longitud != null) {
-			pinSelector = L.marker([latitud, longitud], { draggable: true })
+			pinSelector = Lf.marker([latitud, longitud], { draggable: true })
 				.bindTooltip('Tu local (arrastrame)')
-				.addTo(mapa);
+				.addTo(m);
 			pinSelector.on('dragend', () => {
 				const pos = pinSelector!.getLatLng();
 				oncambio?.(pos.lat, pos.lng);
 			});
 		}
-		const todos: [number, number][] = [
-			...puntos.map((p) => [p.lat, p.lng] as [number, number]),
-			...(yo ? [yo] : []),
-			...(ruta ?? []),
-			...(modoSelector && latitud != null && longitud != null
-				? [[latitud, longitud] as [number, number]]
-				: [])
-		];
-		if (todos.length > 1) mapa.fitBounds(todos, { padding: [30, 30], maxZoom: 16 });
-		else if (todos.length === 1) mapa.setView(todos[0], 16);
+		if (onvisibles) {
+			const limites = limitesActuales();
+			const visibles = limites ? puntos.filter((p) => dentroDeLimites(p, limites)) : puntos;
+			untrack(() => onvisibles(visibles.map((p) => p.id)));
+		}
 	});
 
 	const googleMapsUrl = $derived(

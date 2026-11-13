@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
-import Toaster from '$lib/_auditoria/Toaster.svelte';
-import { toast } from '$lib/_auditoria/toast.svelte';
+import Toaster from '$lib/components/Toaster.svelte';
+import { toast } from '$lib/components/toast.svelte';
 import PublicidadCarousel from '$lib/components/PublicidadCarousel.svelte';
 import MapaComercios from '$lib/components/MapaComercios.svelte';
 
@@ -65,8 +65,8 @@ describe('a11y: Toaster (region viva)', () => {
 
 describe('a11y: PublicidadCarousel', () => {
 	const items = [
-		{ id: 'a', empresa_id: 1, titulo: 'Uno', descripcion: 'Desc uno', imagen_url: '' },
-		{ id: 'b', empresa_id: 2, titulo: 'Dos', descripcion: 'Desc dos', imagen_url: '' }
+		{ id: 'a', empresa_id: 1, titulo: 'Uno', descripcion: 'Desc uno', url_imagen: '' },
+		{ id: 'b', empresa_id: 2, titulo: 'Dos', descripcion: 'Desc dos', url_imagen: '' }
 	];
 
 	it('grupo carrusel con controles nombrados y dots', () => {
@@ -88,7 +88,7 @@ describe('a11y: PublicidadCarousel', () => {
 					empresa_id: null,
 					titulo: 'Colecta del barrio',
 					descripcion: 'Ayudanos con alimentos',
-					imagen_url: ''
+					url_imagen: ''
 				}
 			]
 		});
@@ -107,7 +107,7 @@ describe('a11y: PublicidadCarousel', () => {
 					empresa_id: 3,
 					titulo: 'Con foto',
 					descripcion: 'Desc',
-					imagen_url: 'https://ejemplo.com/foto.jpg'
+					url_imagen: 'https://ejemplo.com/foto.jpg'
 				}
 			]
 		});

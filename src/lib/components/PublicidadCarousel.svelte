@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { animate } from 'animejs';
-	import type { Publicidad } from '$lib/types';
+	import type { ItemCarrusel } from '$lib/types';
 	import { urlEmpresa } from '$lib/slug';
 	import { browser } from '$app/environment';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Share2 from '@lucide/svelte/icons/share-2';
 
-	let { items }: { items: Publicidad[] } = $props();
+	let { items }: { items: ItemCarrusel[] } = $props();
 
 	let active = $state(0);
 	let autoplayTimer: ReturnType<typeof setInterval> | undefined;
@@ -157,13 +157,13 @@
 	}
 
 	/** URL para compartir: la ficha del comercio o la portada si es una colecta de la plataforma. */
-	function enlacePublicidad(pub: Publicidad) {
+	function enlacePublicidad(pub: ItemCarrusel) {
 		const ruta =
 			pub.empresa_id != null ? urlEmpresa({ id: pub.empresa_id, slug: pub.empresa_slug }) : '/';
 		return new URL(ruta, window.location.origin).href;
 	}
 
-	async function compartir(pub: Publicidad) {
+	async function compartir(pub: ItemCarrusel) {
 		const url = enlacePublicidad(pub);
 		const texto = pub.descripcion ? `${pub.titulo} — ${pub.descripcion}` : pub.titulo;
 		if (typeof navigator !== 'undefined' && navigator.share) {
@@ -228,9 +228,9 @@
 						onpointermove={esActiva ? onTiltMove : undefined}
 						onpointerleave={esActiva ? onTiltLeave : undefined}
 					>
-						{#if pub.imagen_url}
+						{#if pub.url_imagen}
 							<img
-								src={pub.imagen_url}
+								src={pub.url_imagen}
 								alt={pub.titulo}
 								class="h-36 w-full object-cover sm:h-40"
 								loading="lazy"
