@@ -35,8 +35,10 @@ test('reservar, cancelar y ver el slot libre de nuevo', async ({ page }) => {
 	await page.getByRole('button', { name: 'Confirmar reserva' }).click();
 	await expect(page.getByText('¡Turno reservado!')).toBeVisible({ timeout: 15_000 });
 
-	// 2. El turno aparece en /cuenta.
-	await page.goto('/cuenta');
+	// 2. El turno aparece en /cuenta. Navegación SPA: un page.goto recargaría la pestaña
+	// y el modo mock perdería el turno recién creado.
+	await page.getByRole('link', { name: 'Ver mis turnos' }).click();
+	await page.waitForURL('/cuenta');
 	await expect(page.getByText('Estilo Urbano Peluquería').first()).toBeVisible({
 		timeout: 15_000
 	});
@@ -46,8 +48,10 @@ test('reservar, cancelar y ver el slot libre de nuevo', async ({ page }) => {
 	await page.getByRole('button', { name: 'Sí, cancelar' }).click();
 	await expect(page.getByText('Turno cancelado')).toBeVisible({ timeout: 15_000 });
 
-	// 4. El slot quedó libre de nuevo en la grilla.
-	await page.goto('/comercios/1/reservar');
+	// 4. El slot quedó libre de nuevo en la grilla. Volvemos con el historial (SPA)
+	// para no resetear el estado en memoria del mock.
+	await page.goBack();
+	await page.waitForURL('/comercios/1/reservar');
 	await page.locator('input[type="date"]').fill(fecha);
 	const mismoSlot = page.locator('.grid button', { hasText: hora.trim() });
 	await expect(mismoSlot).toBeVisible({ timeout: 15_000 });

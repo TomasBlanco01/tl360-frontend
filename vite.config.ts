@@ -17,6 +17,11 @@ export default defineConfig({
 		}),
 		svelteTesting()
 	],
+	// Solo desarrollo: Vite escanea todas las pantallas al arrancar. Si no, la primera vez que se
+	// abre una página con una dependencia nueva (íconos, leaflet) re-optimiza y recarga la página.
+	optimizeDeps: {
+		entries: ['src/**/*.svelte', 'src/**/*.ts', '!src/**/*.test.ts']
+	},
 	test: {
 		environment: 'jsdom',
 		include: ['src/**/*.test.ts'],
