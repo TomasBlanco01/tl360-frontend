@@ -4,7 +4,10 @@ import { auth } from '$lib/stores/auth.svelte';
 /** Resultado de evaluar acceso: null = permitido, string = ruta de redirección. */
 export function evaluarAcceso(requiere: 'auth' | 'admin' | 'superadmin'): string | null {
 	if (!auth.user) return '/auth/login';
-	if (requiere === 'admin' && !auth.isAdmin && !auth.isSuperAdmin) return '/';
+	// Mi Negocio es del dueño de comercio. El superadmin gestiona todos los comercios desde /admin
+	// (si entrara acá vería "Creá tu comercio" y podría cargarse uno a su nombre).
+	if (requiere === 'admin' && auth.isSuperAdmin) return '/admin';
+	if (requiere === 'admin' && !auth.isAdmin) return '/';
 	if (requiere === 'superadmin' && !auth.isSuperAdmin) return '/';
 	return null;
 }

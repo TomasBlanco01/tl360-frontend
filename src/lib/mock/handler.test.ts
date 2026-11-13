@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Empresa } from '$lib/types';
-import { hoyISO, sumarDias } from '$lib/_auditoria/fechas';
+import { hoyISO, sumarDias } from '$lib/utils/fechas';
+
+/** Al menos `dias` días adelante, salteando domingos (los comercios de prueba no atienden). */
+function diaHabil(dias: number) {
+	let fecha = sumarDias(hoyISO(), dias);
+	while (new Date(fecha + 'T12:00:00').getDay() === 0) fecha = sumarDias(fecha, 1);
+	return fecha;
+}
 
 // El handler guarda su estado a nivel de módulo: cada test parte de un módulo nuevo.
 async function nuevo() {
@@ -25,27 +32,27 @@ afterEach(() => vi.useRealTimers());
 describe('mock: rubros', () => {
 	it('lista los rubros de ejemplo', async () => {
 		const { llamar, data } = await nuevo();
-		const r = await llamar('GET', '/categorias');
+		const r = await llamar('GET', '/rubros');
 		expect(r.status).toBe(200);
 		expect(r.data).toHaveLength(data.categoriasSeed.length);
 	});
 
 	it('crea, renombra y elimina', async () => {
 		const { llamar } = await nuevo();
-		const creada = await llamar('POST', '/categorias', { nombre: 'Rubro nuevo' });
+		const creada = await llamar('POST', '/rubros', { nombre: 'Rubro nuevo' });
 		expect(creada.status).toBe(201);
 		const id = creada.data.id;
-		expect((await llamar('PUT', `/categorias/${id}`, { nombre: 'Renombrado' })).data.nombre).toBe(
+		expect((await llamar('PUT', `/rubros/${id}`, { nombre: 'Renombrado' })).data.nombre).toBe(
 			'Renombrado'
 		);
-		expect((await llamar('DELETE', `/categorias/${id}`)).status).toBe(200);
-		const lista = (await llamar('GET', '/categorias')).data as { id: number }[];
+		expect((await llamar('DELETE', `/rubros/${id}`)).status).toBe(200);
+		const lista = (await llamar('GET', '/rubros')).data as { id: number }[];
 		expect(lista.some((c) => c.id === id)).toBe(false);
 	});
 
 	it('renombrar un rubro inexistente da 404', async () => {
 		const { llamar } = await nuevo();
-		expect((await llamar('PUT', '/categorias/99999', { nombre: 'x' })).status).toBe(404);
+		expect((await llamar('PUT', '/rubros/99999', { nombre: 'x' })).status).toBe(404);
 	});
 });
 
@@ -59,20 +66,20 @@ describe('mock: comercios', () => {
 		const { llamar } = await nuevo();
 		const r = (await llamar('GET', '/empresas?q=GIMNASIO')).data as Empresa[];
 		expect(r.length).toBeGreaterThan(0);
-		expect(r.every((e) => /gimnasio/i.test(e.nombre) || /gimnasio/i.test(e.categoria ?? ''))).toBe(
+		expect(r.every((e) => /gimnasio/i.test(e.nombre) || /gimnasio/i.test(e.rubro ?? ''))).toBe(
 			true
 		);
 	});
 
 	it('filtra por rubro y por dueño', async () => {
 		const { llamar } = await nuevo();
-		const porRubro = (await llamar('GET', '/empresas?categoria_id=1')).data as Empresa[];
+		const porRubro = (await llamar('GET', '/empresas?rubro_id=1')).data as Empresa[];
 		expect(porRubro.length).toBeGreaterThan(0);
-		expect(porRubro.every((e) => e.categoria_id === 1)).toBe(true);
-		const propias = (await llamar('GET', '/empresas?admin_id=101')).data as Empresa[];
+		expect(porRubro.every((e) => e.rubro_id === 1)).toBe(true);
+		const propias = (await llamar('GET', '/empresas?usuario_id=101')).data as Empresa[];
 		expect(propias.length).toBeGreaterThan(0);
-		expect(propias.every((e) => e.admin_id === 101)).toBe(true);
-		expect((await llamar('GET', '/empresas?admin_id=424242')).data).toEqual([]);
+		expect(propias.every((e) => e.usuario_id === 101)).toBe(true);
+		expect((await llamar('GET', '/empresas?usuario_id=424242')).data).toEqual([]);
 	});
 
 	it('pagina con limit y offset', async () => {
@@ -121,20 +128,20 @@ describe('mock: comercios', () => {
 			nombre: 'Mi local',
 			direccion: 'Calle 1',
 			telefono: '2392000000',
-			categoria_id: 1,
+			rubro_id: 1,
 			duracion_turno_min: '30'
 		});
 		expect(creada.status).toBe(201);
-		expect(creada.data.categoria).toBe('Peluquería');
+		expect(creada.data.rubro).toBe('Peluquería');
 		expect(creada.data.duracion_turno_min).toBe(30);
 		expect(creada.data.turnos_habilitados).toBe(true);
 		const editada = await llamar('PUT', `/empresas/${creada.data.id}`, {
 			nombre: 'Otro nombre',
-			categoria_id: 2
+			rubro_id: 2
 		});
 		expect(editada.data.nombre).toBe('Otro nombre');
-		expect(editada.data.categoria).toBe('Gimnasio');
-		expect((await llamar('PUT', '/empresas/999999', { categoria_id: 1 })).status).toBe(404);
+		expect(editada.data.rubro).toBe('Gimnasio');
+		expect((await llamar('PUT', '/empresas/999999', { rubro_id: 1 })).status).toBe(404);
 	});
 
 	it('horarios y teléfonos se guardan y se leen', async () => {
@@ -142,8 +149,9 @@ describe('mock: comercios', () => {
 		await llamar('PUT', '/empresas/1/horarios', { horarios: { Lunes: ['09:00-12:00'] } });
 		expect((await llamar('GET', '/empresas/horarios/1')).data).toEqual({ Lunes: ['09:00-12:00'] });
 		const tels = await llamar('PUT', '/empresas/1/telefonos', {
-			telefonos: [{ numero: '111', etiqueta: 'Turnos' }, { numero: '222' }]
+			telefonos: [{ numero: '2392111111', descripcion: 'Turnos' }, { numero: '2392222222' }]
 		});
+		expect(tels.status).toBe(200);
 		expect(tels.data.map((t: { id: number }) => t.id)).toEqual([1, 2]);
 		expect((await llamar('GET', '/empresas/1/telefonos')).data).toHaveLength(2);
 	});
@@ -192,6 +200,8 @@ describe('mock: turnos', () => {
 		const { llamar } = await nuevo();
 		const antes = (await llamar('GET', '/turnos/mis-turnos')).data;
 		expect(antes[0]).toMatchObject({ id: 9000, calificado: false });
+		// El comercio ya trae reseñas de ejemplo (coherentes con su promedio).
+		const previas = (await llamar('GET', '/empresas/1/calificaciones')).data.length;
 		expect(
 			(
 				await llamar('POST', '/empresas/1/calificaciones', {
@@ -207,8 +217,8 @@ describe('mock: turnos', () => {
 			(await llamar('POST', '/empresas/1/calificaciones', { turno_id: 9000, puntaje: 4 })).status
 		).toBe(200);
 		const resenas = (await llamar('GET', '/empresas/1/calificaciones')).data;
-		expect(resenas).toHaveLength(1);
-		expect(resenas[0].puntaje).toBe(4);
+		expect(resenas).toHaveLength(previas + 1);
+		expect(resenas[0]).toMatchObject({ puntaje: 4, usuario_nombre: 'Vos (simulado)' });
 	});
 
 	it('RF-13: exige un turno propio, del comercio y ya pasado', async () => {
@@ -268,11 +278,82 @@ describe('mock: cuentas', () => {
 		expect(su.data.user.rol).toBe('superadmin');
 	});
 
-	it('un correo desconocido entra como cliente de ejemplo', async () => {
+	it('un correo desconocido no inicia sesión (antes entraba como la clienta de ejemplo)', async () => {
 		const { llamar } = await nuevo();
+		const r = await llamar('POST', '/auth/login', { email: 'otro@x.com', contraseña: 'x' });
+		expect(r.status).toBe(401);
+		expect(r.data.error).toBe('Correo o contraseña incorrectos');
+	});
+
+	it('registrarse como Comercio crea una cuenta de dueño que entra a su panel', async () => {
+		const { llamar } = await nuevo();
+		const reg = await llamar('POST', '/auth/register', {
+			nombre: 'Ana',
+			email: 'ana@comercio.com',
+			contraseña: 'Clave1234',
+			rol: 'comercio'
+		});
+		expect(reg.data.user.rol).toBe('admin');
+		await llamar('POST', '/auth/verificar-email', { token: reg.data.token_verificacion });
+		const login = await llamar('POST', '/auth/login', { email: 'ana@comercio.com' });
+		expect(login.data.user).toMatchObject({ rol: 'admin', email_verificado: true });
+	});
+
+	it('un usuario que crea el superadmin puede iniciar sesión con su rol', async () => {
+		const { llamar } = await nuevo();
+		const { auth } = await import('$lib/stores/auth.svelte');
+		auth.login('t', { id: 999, nombre: 'Admin TL360', email: 'admin@demo.com', rol: 'superadmin' });
 		expect(
-			(await llamar('POST', '/auth/login', { email: 'otro@x.com', contraseña: 'x' })).data.user.rol
-		).toBe('cliente');
+			(
+				await llamar('POST', '/usuarios', {
+					nombre: 'Lucas',
+					email: 'lucas@comercio.com',
+					contraseña: 'Clave1234',
+					rol: 'admin'
+				})
+			).status
+		).toBe(201);
+		auth.logout();
+		const login = await llamar('POST', '/auth/login', { email: 'Lucas@Comercio.com' });
+		expect(login.data.user).toMatchObject({
+			nombre: 'Lucas',
+			rol: 'admin',
+			email_verificado: true
+		});
+	});
+
+	it('el superadmin confirma correos y cambia roles con las mismas reglas que el backend', async () => {
+		const { llamar } = await nuevo();
+		const { auth } = await import('$lib/stores/auth.svelte');
+		const reg = await llamar('POST', '/auth/register', {
+			nombre: 'Beto',
+			email: 'beto@x.com',
+			contraseña: 'Clave1234'
+		});
+		const id = reg.data.user.id;
+		expect((await llamar('PUT', `/usuarios/${id}`, { email_verificado: true })).status).toBe(403);
+		auth.login('t', { id: 999, nombre: 'Admin TL360', email: 'admin@demo.com', rol: 'superadmin' });
+		const lista = (await llamar('GET', '/usuarios?q=beto')).data;
+		expect(lista[0].email_verificado).toBe(false);
+		const ok = await llamar('PUT', `/usuarios/${id}`, { email_verificado: true, rol: 'admin' });
+		expect(ok.data).toMatchObject({ rol: 'admin', email_verificado: true });
+		expect((await llamar('PUT', '/usuarios/999', { rol: 'cliente' })).status).toBe(400);
+		// Sofía (101) tiene comercios: no puede dejar de ser dueña.
+		expect((await llamar('PUT', '/usuarios/101', { rol: 'cliente' })).status).toBe(409);
+		auth.logout();
+	});
+
+	it('reservar online es solo de clientes', async () => {
+		const { llamar } = await nuevo();
+		const { auth } = await import('$lib/stores/auth.svelte');
+		auth.login('t', { id: 101, nombre: 'Sofía', email: 'negocio@demo.com', rol: 'admin' });
+		const r = await llamar('POST', '/turnos/reservar', {
+			empresa_id: 1,
+			fecha: '2031-01-07',
+			hora: '10:00'
+		});
+		expect(r.status).toBe(403);
+		auth.logout();
 	});
 
 	it('el registro devuelve un cliente nuevo con id propio', async () => {
@@ -350,115 +431,149 @@ describe('mock: verificación de correo (RF-01)', () => {
 	});
 });
 
-describe('mock: canal público de difusión (RF-06)', () => {
-	it('recibe una solicitud sin sesión y evita duplicados pendientes', async () => {
+describe('mock: difusiones de colectas y eventos (RF-06)', () => {
+	const pedido = {
+		tipo: 'colecta',
+		titulo: 'Colecta de abrigos',
+		descripcion: 'Juntamos abrigos para el invierno en la plaza.',
+		solicitante_nombre: 'Vecinos del barrio',
+		solicitante_contacto: 'vecinos@demo.com'
+	};
+
+	it('se pide sin sesión, queda pendiente y evita duplicados del mismo contacto', async () => {
 		const { llamar } = await nuevo();
-		const nueva = {
-			nombre: 'Feria del barrio',
-			contacto: 'feria@demo.com',
-			tipo: 'colecta',
-			mensaje: 'Feria de emprendedores el sábado en la plaza.'
-		};
-		expect((await llamar('POST', '/solicitudes-publicidad', nueva)).status).toBe(201);
-		const repetida = await llamar('POST', '/solicitudes-publicidad', {
-			...nueva,
-			contacto: 'FERIA@demo.com'
+		const creada = await llamar('POST', '/difusiones', pedido);
+		expect(creada.status).toBe(201);
+		expect(creada.data.estado).toBe('pendiente');
+		const repetida = await llamar('POST', '/difusiones', {
+			...pedido,
+			solicitante_contacto: 'VECINOS@demo.com'
 		});
 		expect(repetida.status).toBe(409);
+		// Las pendientes no salen en la portada.
+		const portada = (await llamar('GET', '/difusiones')).data;
+		expect(portada.every((d: { estado: string }) => d.estado === 'aprobada')).toBe(true);
+		expect(portada.some((d: { titulo: string }) => d.titulo === 'Colecta de abrigos')).toBe(false);
 	});
 
-	it('valida tipo y largo del mensaje', async () => {
+	it('valida tipo, título, descripción y contacto', async () => {
 		const { llamar } = await nuevo();
-		const base = {
-			nombre: 'Ana',
-			contacto: '11 5555-1234',
-			mensaje: 'Mensaje suficientemente largo'
-		};
-		expect(
-			(await llamar('POST', '/solicitudes-publicidad', { ...base, tipo: 'sorteo' })).status
-		).toBe(400);
-		expect(
-			(await llamar('POST', '/solicitudes-publicidad', { ...base, mensaje: 'corto' })).status
-		).toBe(400);
+		for (const malo of [
+			{ tipo: 'rifa' },
+			{ titulo: 'x' },
+			{ descripcion: 'corta' },
+			{ solicitante_contacto: 'sin datos' }
+		]) {
+			expect((await llamar('POST', '/difusiones', { ...pedido, ...malo })).status).toBe(400);
+		}
 	});
 
-	it('la bandeja muestra pendientes y el admin las resuelve', async () => {
+	it('la bandeja lista las pendientes y aprobar la pasa a la portada', async () => {
 		const { llamar } = await nuevo();
-		const pendientes = (await llamar('GET', '/solicitudes-publicidad')).data as { id: number }[];
+		const pendientes = (await llamar('GET', '/difusiones?estado=pendiente')).data;
 		expect(pendientes.length).toBeGreaterThan(0);
 		const id = pendientes[0].id;
-		expect(
-			(await llamar('PUT', `/solicitudes-publicidad/${id}`, { estado: 'atendida' })).status
-		).toBe(200);
-		const ahora = (await llamar('GET', '/solicitudes-publicidad')).data as { id: number }[];
-		expect(ahora.some((s) => s.id === id)).toBe(false);
-		const todas = (await llamar('GET', '/solicitudes-publicidad?todas=true')).data as {
-			id: number;
-		}[];
-		expect(todas.some((s) => s.id === id)).toBe(true);
+		expect((await llamar('PUT', `/difusiones/${id}/estado`, { estado: 'publicada' })).status).toBe(
+			400
+		);
+		const aprobada = await llamar('PUT', `/difusiones/${id}/estado`, { estado: 'aprobada' });
+		expect(aprobada.data.estado).toBe('aprobada');
+		const portada = (await llamar('GET', '/difusiones')).data;
+		expect(portada.some((d: { id: number }) => d.id === id)).toBe(true);
+		expect((await llamar('DELETE', `/difusiones/${id}`)).status).toBe(200);
+		expect((await llamar('DELETE', `/difusiones/${id}`)).status).toBe(404);
+	});
+
+	it('la que carga el superadmin nace aprobada', async () => {
+		const { llamar } = await nuevo();
+		const { auth } = await import('$lib/stores/auth.svelte');
+		auth.login('t', { id: 1, nombre: 'Admin TL360', email: 'admin@demo.com', rol: 'superadmin' });
+		const creada = await llamar('POST', '/difusiones', {
+			tipo: 'evento',
+			titulo: 'Maratón solidaria',
+			descripcion: 'Domingo a las 9 en la plaza principal.'
+		});
+		expect(creada.data).toMatchObject({
+			estado: 'aprobada',
+			solicitante_contacto: 'admin@demo.com'
+		});
+		auth.logout();
 	});
 });
 
-describe('mock: colectas sin comercio (RF-06)', () => {
-	it('el carrusel incluye una colecta de la plataforma y se puede crear otra', async () => {
+describe('mock: publicidades con aprobación (RF-06)', () => {
+	const nueva = {
+		empresa_id: 1,
+		titulo: '2x1',
+		descripcion: 'Este mes',
+		url_imagen: 'https://x.com/a.jpg'
+	};
+
+	it('la portada muestra solo las aprobadas; la del dueño queda pendiente', async () => {
 		const { llamar } = await nuevo();
-		const lista = (await llamar('GET', '/publicidades')).data as { empresa_id: number | null }[];
-		expect(lista.some((p) => p.empresa_id === null)).toBe(true);
-		const nueva = await llamar('POST', '/publicidades', {
-			empresa_id: null,
-			titulo: 'Colecta para el merendero',
-			descripcion: 'Juntamos leche y galletitas',
-			imagen_url: 'https://x.com/colecta.jpg'
-		});
-		expect(nueva.status).toBe(201);
-		expect(nueva.data.empresa_id).toBeNull();
-	});
-});
-
-describe('mock: atenciones de mostrador (RF-04)', () => {
-	it('registra, resume y elimina una atención', async () => {
-		const { llamar } = await nuevo();
-		const alta = await llamar('POST', '/empresas/2/atenciones', {
-			cantidad: 4,
-			importe: 1000.5,
-			nota: 'Corte + barba'
-		});
-		expect(alta.status).toBe(201);
-
-		const lista = (await llamar('GET', '/empresas/2/atenciones')).data;
-		expect(lista.atenciones[0]).toMatchObject({
-			cantidad: 4,
-			importe: 1000.5,
-			nota: 'Corte + barba'
-		});
-		expect(lista.resumen).toEqual({
-			hoy_cantidad: 4,
-			hoy_importe: 1000.5,
-			mes_cantidad: 4,
-			mes_importe: 1000.5,
-			total_cantidad: 4,
-			total_importe: 1000.5
-		});
-
-		expect((await llamar('DELETE', `/empresas/2/atenciones/${alta.data.id}`)).status).toBe(200);
-		const vacio = (await llamar('GET', '/empresas/2/atenciones')).data;
-		expect(vacio.atenciones).toEqual([]);
-		expect(vacio.resumen.total_cantidad).toBe(0);
+		const portada = (await llamar('GET', '/publicidades')).data;
+		expect(portada.length).toBeGreaterThan(0);
+		expect(portada.every((p: { estado: string }) => p.estado === 'aprobada')).toBe(true);
+		const creada = await llamar('POST', '/publicidades', nueva);
+		expect(creada.status).toBe(201);
+		expect(creada.data).toMatchObject({ estado: 'pendiente', empresa_nombre: expect.any(String) });
+		const mias = (await llamar('GET', '/publicidades?empresa_id=1&estado=todas')).data;
+		expect(mias.some((p: { id: string }) => p.id === creada.data.id)).toBe(true);
 	});
 
-	it('valida cantidad, importe y fecha futura', async () => {
+	it('exige comercio, título, descripción e imagen http(s)', async () => {
 		const { llamar } = await nuevo();
-		for (const cuerpo of [
-			{ cantidad: 0 },
-			{ cantidad: 1, importe: 0 },
-			{ cantidad: 1, fecha: sumarDias(hoyISO(), 1) }
+		for (const malo of [
+			{ empresa_id: null },
+			{ titulo: ' ' },
+			{ descripcion: '' },
+			{ url_imagen: 'javascript:alert(1)' }
 		]) {
-			expect((await llamar('POST', '/empresas/2/atenciones', cuerpo)).status).toBe(400);
+			expect((await llamar('POST', '/publicidades', { ...nueva, ...malo })).status).toBe(400);
 		}
+	});
+
+	it('el superadmin la aprueba y pasa a la portada', async () => {
+		const { llamar } = await nuevo();
+		const pendiente = (await llamar('GET', '/publicidades?estado=pendiente')).data[0];
+		expect(pendiente).toBeTruthy();
+		const r = await llamar('PUT', `/publicidades/${pendiente.id}/estado`, { estado: 'aprobada' });
+		expect(r.data.estado).toBe('aprobada');
+		const portada = (await llamar('GET', '/publicidades')).data;
+		expect(portada.some((p: { id: string }) => p.id === pendiente.id)).toBe(true);
+	});
+});
+
+describe('mock: resumen del comercio', () => {
+	it('cuenta los turnos online y de mostrador del período', async () => {
+		const { llamar } = await nuevo();
+		const fecha = diaHabil(2);
+		await llamar('POST', '/turnos/reservar', { empresa_id: 1, fecha, hora: '10:00' });
+		await llamar('POST', '/empresas/1/turnos', {
+			fecha,
+			hora: '11:00',
+			cliente_nombre: 'Juan',
+			nota: 'Por teléfono'
+		});
+		const r = await llamar(
+			'GET',
+			`/empresas/1/resumen?desde=${hoyISO()}&hasta=${sumarDias(hoyISO(), 7)}`
+		);
+		expect(r.status).toBe(200);
+		expect(r.data.turnos).toMatchObject({ turnos: 2, online: 1, mostrador: 1 });
+		expect(r.data.por_dia).toEqual([{ fecha, turnos: 2, cancelados: 0 }]);
+		const invertido = await llamar('GET', `/empresas/1/resumen?desde=${fecha}&hasta=${hoyISO()}`);
+		expect(invertido.status).toBe(400);
 	});
 });
 
 describe('mock: rechazo de verificación con motivo (RF-15)', () => {
+	it('el sello no se otorga con el endpoint de retiro', async () => {
+		const { llamar } = await nuevo();
+		const r = await llamar('PUT', '/empresas/1/verificado', { verificado: true });
+		expect(r.status).toBe(409);
+	});
+
 	it('rechazar exige motivo, lo guarda y una nueva solicitud lo limpia', async () => {
 		const { llamar } = await nuevo();
 		const sinMotivo = await llamar('PUT', '/empresas/1/verificacion', { accion: 'rechazar' });
@@ -480,7 +595,7 @@ describe('mock: rechazo de verificación con motivo (RF-15)', () => {
 describe('mock: turnos agendados por el comercio (RF-04)', () => {
 	it('agenda para alguien sin cuenta, ocupa el horario y se puede cancelar', async () => {
 		const { llamar } = await nuevo();
-		const fecha = sumarDias(hoyISO(), 5);
+		const fecha = diaHabil(5);
 		expect(
 			(await llamar('POST', '/empresas/1/turnos', { fecha, hora: '10:00', cliente_nombre: ' ' }))
 				.status
@@ -489,7 +604,8 @@ describe('mock: turnos agendados por el comercio (RF-04)', () => {
 			fecha,
 			hora: '10:00',
 			cliente_nombre: 'Carlos Medina',
-			cliente_email: 'carlos@ejemplo.com'
+			cliente_email: 'carlos@ejemplo.com',
+			nota: 'Pidió por teléfono'
 		});
 		expect(creado.status).toBe(201);
 		const lista = (await llamar('GET', '/empresas/1/turnos')).data;
@@ -498,10 +614,16 @@ describe('mock: turnos agendados por el comercio (RF-04)', () => {
 				id: creado.data.id,
 				cliente_nombre: 'Carlos Medina',
 				cliente_email: 'carlos@ejemplo.com',
-				sin_cuenta: true
+				sin_cuenta: true,
+				origen: 'mostrador',
+				nota: 'Pidió por teléfono'
 			})
 		);
 		// El mismo horario ya no se puede reservar ni volver a agendar.
+		expect(
+			(await llamar('POST', '/empresas/1/turnos', { fecha, hora: '10:00', cliente_nombre: 'Otro' }))
+				.status
+		).toBe(409);
 		expect(
 			(await llamar('POST', '/turnos/reservar', { empresa_id: 1, fecha, hora: '10:00' })).status
 		).toBe(409);
@@ -509,6 +631,19 @@ describe('mock: turnos agendados por el comercio (RF-04)', () => {
 		expect(
 			(await llamar('POST', '/turnos/reservar', { empresa_id: 1, fecha, hora: '10:00' })).status
 		).toBe(201);
+	});
+
+	it('solo agenda en los horarios de la grilla del comercio', async () => {
+		const { llamar } = await nuevo();
+		const fecha = diaHabil(5);
+		let domingo = fecha;
+		while (new Date(domingo + 'T12:00:00').getDay() !== 0) domingo = sumarDias(domingo, 1);
+		const agendar = (f: string, hora: string) =>
+			llamar('POST', '/empresas/1/turnos', { fecha: f, hora, cliente_nombre: 'Ana' });
+		expect((await agendar(domingo, '10:00')).status).toBe(400);
+		expect((await agendar(fecha, '10:10')).status).toBe(400);
+		expect((await agendar(fecha, '14:00')).status).toBe(400);
+		expect((await agendar(fecha, '16:30')).status).toBe(201);
 	});
 
 	it('las reservas del cliente demo llegan al comercio con nombre y correo', async () => {

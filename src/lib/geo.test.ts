@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { agruparPuntos, distanciaKm, escaparHtml, formatearDistancia } from './geo';
+import {
+	agruparEnPantalla,
+	dentroDeLimites,
+	distanciaKm,
+	escaparHtml,
+	formatearDistancia
+} from './geo';
 
 describe('distanciaKm', () => {
 	it('es 0 entre el mismo punto', () => {
@@ -35,34 +41,48 @@ describe('formatearDistancia', () => {
 	});
 });
 
-describe('agruparPuntos', () => {
-	it('agrupa puntos cercanos y deja solos a los lejanos', () => {
-		const grupos = agruparPuntos(
-			[
-				{ lat: -35.9711, lng: -62.7333 },
-				{ lat: -35.9712, lng: -62.7334 },
-				{ lat: -35.9, lng: -62.6 }
-			],
-			14
-		);
-		expect(grupos).toHaveLength(2);
-		expect(grupos.map((g) => g.items.length).sort()).toEqual([1, 2]);
-	});
-
-	it('a más zoom, menos agrupación', () => {
-		const pts = [
-			{ lat: -35.9711, lng: -62.7333 },
-			{ lat: -35.9725, lng: -62.7345 }
-		];
-		expect(agruparPuntos(pts, 12)).toHaveLength(1);
-		expect(agruparPuntos(pts, 16)).toHaveLength(2);
-	});
-});
-
 describe('escaparHtml', () => {
 	it('escapa caracteres para popup seguro', () => {
 		expect(escaparHtml('<b>"x"&\'y\'</b>')).toBe(
 			'&lt;b&gt;&quot;x&quot;&amp;&#39;y&#39;&lt;/b&gt;'
 		);
+	});
+});
+
+describe('agruparEnPantalla', () => {
+	// Proyección de juguete: 1 grado = 1000 px multiplicado por el "zoom".
+	const proyeccion = (zoom: number) => (lat: number, lng: number) => ({
+		x: lng * 1000 * zoom,
+		y: -lat * 1000 * zoom
+	});
+	const pts = [
+		{ id: 1, lat: -35.97, lng: -62.73 },
+		{ id: 2, lat: -35.9701, lng: -62.7301 },
+		{ id: 3, lat: -35.99, lng: -62.75 }
+	];
+
+	it('alejado agrupa y acercándose separa cada punto', () => {
+		expect(agruparEnPantalla(pts, proyeccion(1), 56)).toHaveLength(1);
+		expect(agruparEnPantalla(pts, proyeccion(10), 56)).toHaveLength(2);
+		expect(agruparEnPantalla(pts, proyeccion(1000), 56)).toHaveLength(3);
+	});
+
+	it('sin celda (zoom máximo) no agrupa puntos separados', () => {
+		expect(agruparEnPantalla(pts, proyeccion(1000), 0)).toHaveLength(3);
+	});
+
+	it('sin celda junta solo los que comparten ubicación (para abrirlos en abanico)', () => {
+		const mismaDireccion = [...pts, { id: 4, lat: -35.99, lng: -62.75 }];
+		const grupos = agruparEnPantalla(mismaDireccion, proyeccion(1000), 0);
+		expect(grupos).toHaveLength(3);
+		expect(grupos.find((g) => g.items.length === 2)?.items.map((p) => p.id)).toEqual([3, 4]);
+	});
+});
+
+describe('dentroDeLimites', () => {
+	it('incluye los puntos del recuadro y deja afuera el resto', () => {
+		const limites: [number, number, number, number] = [-36, -62.8, -35.9, -62.7];
+		expect(dentroDeLimites({ lat: -35.97, lng: -62.73 }, limites)).toBe(true);
+		expect(dentroDeLimites({ lat: -35.8, lng: -62.73 }, limites)).toBe(false);
 	});
 });

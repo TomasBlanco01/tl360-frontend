@@ -43,7 +43,7 @@ describe('api (backend real)', () => {
 	it('un GET sin sesión no manda Authorization ni Content-Type', async () => {
 		responder(200, {});
 		const { api } = await cargar();
-		await api.get('/categorias');
+		await api.get('/rubros');
 		const headers: Headers = fetchMock.mock.calls[0][1].headers;
 		expect(headers.get('Authorization')).toBeNull();
 		expect(headers.get('Content-Type')).toBeNull();
@@ -151,7 +151,7 @@ describe('api (modo mock)', () => {
 	it('no usa la red: responde con el backend en memoria', async () => {
 		vi.useFakeTimers();
 		const { api } = await cargar('true');
-		const promesa = api.get<{ id: number }[]>('/categorias');
+		const promesa = api.get<{ id: number }[]>('/rubros');
 		await vi.advanceTimersByTimeAsync(300);
 		expect((await promesa).length).toBeGreaterThan(5);
 		expect(fetchMock).not.toHaveBeenCalled();
