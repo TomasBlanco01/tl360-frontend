@@ -32,7 +32,7 @@ const fila = (nombre: string) => screen.getByText(nombre).closest('li')!;
 
 // 1.4 La solapa principal es la verificación; los tests de categorías navegan a su solapa.
 async function abrirCategorias() {
-	await userEvent.click(screen.getByRole('button', { name: 'Categorías' }));
+	await userEvent.click(screen.getByRole('button', { name: 'Rubros' }));
 	await screen.findByRole('button', { name: 'Agregar' });
 }
 
@@ -60,7 +60,7 @@ describe('panel de administración', () => {
 		await abrirCategorias();
 		expect(screen.getByText('Peluquerías')).toBeInTheDocument();
 		expect(screen.getByText('Gimnasios')).toBeInTheDocument();
-		expect(get).toHaveBeenCalledWith('/categorias');
+		expect(get).toHaveBeenCalledWith('/rubros');
 	});
 
 	it('sin rubros lo indica', async () => {
@@ -70,7 +70,7 @@ describe('panel de administración', () => {
 		});
 		render(Admin);
 		await abrirCategorias();
-		expect(await screen.findByText('Todavía no hay categorías cargadas.')).toBeInTheDocument();
+		expect(await screen.findByText('Todavía no hay rubros cargados.')).toBeInTheDocument();
 	});
 
 	describe('crear', () => {
@@ -85,19 +85,19 @@ describe('panel de administración', () => {
 		it('crea el rubro, limpia el campo y recarga la lista', async () => {
 			render(Admin);
 			await abrirCategorias();
-			const campo = screen.getByLabelText('Nombre') as HTMLInputElement;
+			const campo = screen.getByLabelText(/^Nombre/) as HTMLInputElement;
 			await userEvent.type(campo, 'Yoga');
 			await userEvent.click(screen.getByRole('button', { name: 'Agregar' }));
-			await vi.waitFor(() => expect(post).toHaveBeenCalledWith('/categorias', { nombre: 'Yoga' }));
+			await vi.waitFor(() => expect(post).toHaveBeenCalledWith('/rubros', { nombre: 'Yoga' }));
 			await vi.waitFor(() => expect(campo.value).toBe(''));
-			expect(get.mock.calls.filter((c) => c[0] === '/categorias')).toHaveLength(2);
+			expect(get.mock.calls.filter((c) => c[0] === '/rubros')).toHaveLength(2);
 		});
 
 		it('si el nombre está repetido muestra el aviso del backend (409)', async () => {
 			post.mockRejectedValue(new ApiError(409, 'Ya existe un rubro con ese nombre'));
 			render(Admin);
 			await abrirCategorias();
-			await userEvent.type(screen.getByLabelText('Nombre'), 'Gimnasios');
+			await userEvent.type(screen.getByLabelText(/^Nombre/), 'Gimnasios');
 			await userEvent.click(screen.getByRole('button', { name: 'Agregar' }));
 			expect(await screen.findByText('Ya existe un rubro con ese nombre')).toBeInTheDocument();
 		});
@@ -113,7 +113,7 @@ describe('panel de administración', () => {
 			await userEvent.type(campo, 'Peluquerías y barberías');
 			await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
 			await vi.waitFor(() =>
-				expect(put).toHaveBeenCalledWith('/categorias/1', { nombre: 'Peluquerías y barberías' })
+				expect(put).toHaveBeenCalledWith('/rubros/1', { nombre: 'Peluquerías y barberías' })
 			);
 		});
 
@@ -145,7 +145,7 @@ describe('panel de administración', () => {
 				await screen.findByText(/Solo se puede eliminar si no tiene comercios asignados/)
 			).toBeInTheDocument();
 			await userEvent.click(screen.getByRole('button', { name: 'Sí, eliminar' }));
-			await vi.waitFor(() => expect(borrar).toHaveBeenCalledWith('/categorias/2'));
+			await vi.waitFor(() => expect(borrar).toHaveBeenCalledWith('/rubros/2'));
 		});
 
 		it('si se cancela la confirmación no borra', async () => {
@@ -179,10 +179,10 @@ describe('panel de administración', () => {
 						{
 							id: 2,
 							nombre: 'Barbería Dorrego',
-							categoria: 'Peluquería',
+							rubro: 'Peluquería',
 							direccion: 'Dorrego 156',
 							cuit: '20123456786',
-							constancia_cuit_url: 'https://x.com/c.pdf',
+							url_cuit: 'https://x.com/c.pdf',
 							slug: 'barberia-dorrego'
 						}
 					];
