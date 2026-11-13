@@ -25,7 +25,7 @@ const lote = (desde: number, cuantos: number) =>
 
 /** Responde /categorias y delega los pedidos a /empresas en `porPedido`. */
 function backend(porPedido: (url: string) => unknown) {
-	get.mockImplementation(async (url: string) => (url === '/categorias' ? rubros : porPedido(url)));
+	get.mockImplementation(async (url: string) => (url === '/rubros' ? rubros : porPedido(url)));
 }
 const pedidosDeEmpresas = () =>
 	get.mock.calls.map((c) => c[0] as string).filter((u) => u.startsWith('/empresas?'));
@@ -99,7 +99,7 @@ describe('listado de comercios', () => {
 		backend(() => lote(1, 1));
 		render(Comercios);
 		await screen.findByText('Comercio 1');
-		expect(pedidosDeEmpresas()[0]).toBe('/empresas?q=peluq&categoria_id=1&limit=25&offset=0');
+		expect(pedidosDeEmpresas()[0]).toBe('/empresas?q=peluq&rubro_id=1&limit=25&offset=0');
 	});
 
 	it('al escribir busca de nuevo (con espera) y reemplaza los resultados', async () => {
@@ -115,21 +115,36 @@ describe('listado de comercios', () => {
 		expect(pedidosDeEmpresas().filter((u) => u.includes('q=')).length).toBeLessThan(3);
 	});
 
-	it('el selector de rubros solo ofrece los que tienen comercios', async () => {
+	it('el selector de rubros solo ofrece los que tienen comercios, en orden alfabético', async () => {
 		backend(() => lote(1, 1));
 		render(Comercios);
 		await screen.findByText('Comercio 1');
-		const opciones = screen.getAllByRole('option').map((o) => o.textContent);
-		expect(opciones).toEqual(['Todos los rubros', 'Peluquerías', 'Gimnasios']);
+		await userEvent.click(screen.getByRole('combobox', { name: 'Filtrar por rubro' }));
+		const opciones = screen
+			.getAllByRole('option')
+			.map((o) => o.firstElementChild?.textContent?.trim());
+		expect(opciones).toEqual(['Todos los rubros', 'Gimnasios', 'Peluquerías']);
+	});
+
+	it('el selector de rubros tiene buscador interno', async () => {
+		backend(() => lote(1, 1));
+		render(Comercios);
+		await screen.findByText('Comercio 1');
+		await userEvent.type(screen.getByRole('combobox', { name: 'Filtrar por rubro' }), 'pelu');
+		const opciones = screen
+			.getAllByRole('option')
+			.map((o) => o.firstElementChild?.textContent?.trim());
+		expect(opciones).toEqual(['Peluquerías']);
 	});
 
 	it('elegir un rubro filtra en el backend', async () => {
 		backend(() => lote(1, 1));
 		render(Comercios);
 		await screen.findByText('Comercio 1');
-		await userEvent.selectOptions(screen.getByRole('combobox'), 'Gimnasios');
+		await userEvent.click(screen.getByRole('combobox', { name: 'Filtrar por rubro' }));
+		await userEvent.click(screen.getByRole('option', { name: /Gimnasios/ }));
 		await vi.waitFor(() =>
-			expect(pedidosDeEmpresas().at(-1)).toBe('/empresas?categoria_id=2&limit=25&offset=0')
+			expect(pedidosDeEmpresas().at(-1)).toBe('/empresas?rubro_id=2&limit=25&offset=0')
 		);
 	});
 
@@ -170,9 +185,7 @@ describe('listado de comercios', () => {
 		render(Comercios);
 		await screen.findByText('Comercio 1');
 		await userEvent.click(screen.getByRole('button', { name: 'Cerca de mí' }));
-		await vi.waitFor(() =>
-			expect(pedidosDeEmpresas().at(-1)).toContain('lat=-35.97&lng=-62.73')
-		);
+		await vi.waitFor(() => expect(pedidosDeEmpresas().at(-1)).toContain('lat=-35.97&lng=-62.73'));
 		const url = vi.mocked(goto).mock.lastCall?.[0] as string;
 		expect(url).not.toContain('lat=');
 		expect(url).not.toContain('lng=');

@@ -22,6 +22,7 @@ async function llenar(mensaje = MENSAJE) {
 	await userEvent.type(screen.getByLabelText(/Nombre o institución/), 'Comisión del barrio');
 	await userEvent.type(screen.getByLabelText(/Email o teléfono/), 'vecinos@demo.com');
 	await userEvent.selectOptions(screen.getByLabelText(/Qué querés difundir/), 'colecta');
+	await userEvent.type(screen.getByLabelText(/Título de la difusión/), 'Comedor del barrio');
 	await userEvent.type(screen.getByLabelText(/Contanos de qué se trata/), mensaje);
 }
 
@@ -32,11 +33,13 @@ describe('canal público de difusión (RF-06)', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar solicitud' }));
 
 		await vi.waitFor(() =>
-			expect(post).toHaveBeenCalledWith('/solicitudes-publicidad', {
-				nombre: 'Comisión del barrio',
-				contacto: 'vecinos@demo.com',
+			expect(post).toHaveBeenCalledWith('/difusiones', {
 				tipo: 'colecta',
-				mensaje: MENSAJE
+				titulo: 'Comedor del barrio',
+				descripcion: MENSAJE,
+				url_imagen: null,
+				solicitante_nombre: 'Comisión del barrio',
+				solicitante_contacto: 'vecinos@demo.com'
 			})
 		);
 		expect(await screen.findByText('¡Recibimos tu solicitud!')).toBeInTheDocument();
@@ -51,14 +54,23 @@ describe('canal público de difusión (RF-06)', () => {
 		expect(post).not.toHaveBeenCalled();
 	});
 
+	it('una imagen que no es http(s) no se envía', async () => {
+		render(Page);
+		await llenar();
+		await userEvent.type(screen.getByLabelText(/Imagen/), 'javascript:alert(1)');
+		await userEvent.click(screen.getByRole('button', { name: 'Enviar solicitud' }));
+		expect(await screen.findByRole('alert')).toHaveTextContent('http');
+		expect(post).not.toHaveBeenCalled();
+	});
+
 	it('muestra el aviso del backend si el contacto ya tiene una pendiente', async () => {
 		post.mockRejectedValue(
-			new ApiError(409, 'Ya recibimos una solicitud con este contacto y está pendiente')
+			new ApiError(409, 'Ya recibimos un pedido con este contacto y está pendiente')
 		);
 		render(Page);
 		await llenar();
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar solicitud' }));
 
-		expect(await screen.findByRole('alert')).toHaveTextContent('Ya recibimos una solicitud');
+		expect(await screen.findByRole('alert')).toHaveTextContent('Ya recibimos un pedido');
 	});
 });

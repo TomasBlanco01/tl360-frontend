@@ -10,7 +10,7 @@
 		const q = page.url.searchParams.get('q');
 		if (q) params.set('q', q);
 		const categoria =
-			page.url.searchParams.get('categoria') ?? page.url.searchParams.get('categoria_id');
+			page.url.searchParams.get('categoria') ?? page.url.searchParams.get('rubro_id');
 		if (categoria) params.set('categoria', categoria);
 		const etiquetas = page.url.searchParams.get('etiquetas');
 		if (etiquetas) params.set('etiquetas', etiquetas);

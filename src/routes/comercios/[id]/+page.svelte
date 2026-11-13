@@ -9,7 +9,7 @@
 	import { enlaceLlamada, enlaceWhatsApp, formatearTelefono } from '$lib/contacto';
 	import { urlReservar } from '$lib/slug';
 	import { formatearFechaAR } from '$lib/validation';
-	import { toast } from '$lib/_auditoria/toast.svelte';
+	import { toast } from '$lib/components/toast.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
@@ -27,7 +27,6 @@
 
 	// 1.1 El parámetro puede ser id numérico o slug SEO (`/comercios/estilo-urbano-peluqueria`).
 	const slugOId = $derived(page.params.id ?? '');
-	const empresaId = $derived(Number(slugOId));
 
 	let empresa = $state<Empresa | null>(null);
 	let horarios = $state<HorariosPorDia>({});
@@ -36,6 +35,11 @@
 	let rutaGeometria = $state<[number, number][] | null>(null);
 
 	const gruposHorario = $derived(agruparHorarios(horarios));
+	// Un comercio dado de alta sin horarios (por ejemplo, por el superadmin) todavía no puede
+	// recibir reservas: hasta que el dueño los cargue, se ofrece el contacto directo.
+	const sinAgenda = $derived(
+		empresa?.turnos_habilitados !== false && Object.keys(horarios).length === 0
+	);
 
 	$effect(() => {
 		const param = slugOId;
@@ -69,7 +73,10 @@
 	let mensajeResena = $state('');
 	let errorResena = $state(false);
 
-	const esDueno = $derived(!!auth.user && empresa?.admin_id === auth.user.id);
+	const esDueno = $derived(!!auth.user && empresa?.usuario_id === auth.user.id);
+	// Reservar y calificar son acciones de cliente (igual que en el backend): el dueño agenda desde
+	// Mi Negocio y el superadmin no opera como cliente.
+	const puedeReservar = $derived(!auth.user || auth.user.rol === 'cliente');
 
 	// RF-13: solo se califica un turno propio ya realizado, y una sola vez por turno.
 	let turnosCalificables = $state<MiTurno[]>([]);
@@ -105,7 +112,8 @@
 	});
 
 	$effect(() => {
-		const id = empresa?.id ?? empresaId;
+		const id = empresa?.id;
+		if (!id) return;
 		api
 			.get<Resena[]>(`/empresas/${id}/calificaciones`)
 			.then((r) => (resenas = r))
@@ -172,7 +180,7 @@
 			return;
 		}
 		try {
-			await api.post(`/empresas/${empresa.id}/reportes`, { motivo: motivoReporte.trim() });
+			await api.post(`/empresas/${empresa.id}/reportes`, { descripcion: motivoReporte.trim() });
 			mensajeReporte = 'Reporte enviado. Gracias por avisarnos.';
 			motivoReporte = '';
 			reportando = false;
@@ -185,32 +193,39 @@
 	}
 
 	// ---------- Sello de verificado (RF-15, solo superadmin) ----------
+	// Otorgarlo exige aprobar la solicitud con constancia desde Admin; acá solo se retira.
 	let mensajeSello = $state('');
-	async function alternarVerificado() {
-		if (!empresa) return;
+	async function quitarVerificado() {
+		if (!empresa?.verificado) return;
 		mensajeSello = '';
 		try {
 			const res = await api.put<{ verificado: boolean }>(`/empresas/${empresa.id}/verificado`, {
-				verificado: !empresa.verificado
+				verificado: false
 			});
 			empresa = { ...empresa, verificado: res.verificado };
-			toast.exito(res.verificado ? 'Comercio verificado.' : 'Sello de verificado quitado.');
+			toast.exito('Sello de verificado quitado.');
 		} catch (err) {
-			mensajeSello = err instanceof ApiError ? err.message : 'No se pudo cambiar el sello.';
+			mensajeSello = err instanceof ApiError ? err.message : 'No se pudo quitar el sello.';
 			toast.error(mensajeSello);
 		}
 	}
 
 	const abierto = $derived(estaAbiertoAhora(horarios));
 
-	// Uno o varios teléfonos (un local puede tener varios barberos/profesionales).
+	// Uno o varios teléfonos (un local puede tener varios barberos/profesionales); el principal primero.
 	const telefonos = $derived(
-		empresa?.telefonos && empresa.telefonos.length > 0
-			? empresa.telefonos
-			: empresa
-				? [{ numero: empresa.telefono }]
-				: []
+		[...(empresa?.telefonos ?? [])].sort((a, b) => Number(!!b.principal) - Number(!!a.principal))
 	);
+
+	const NOMBRE_RED: Record<string, string> = {
+		instagram: 'Instagram',
+		facebook: 'Facebook',
+		tiktok: 'TikTok',
+		x: 'X',
+		youtube: 'YouTube',
+		web: 'Sitio web'
+	};
+	const redes = $derived(empresa?.redes_sociales ?? []);
 
 	const mapaSrc = $derived(
 		empresa
@@ -306,8 +321,8 @@
 							<Badge tone="neutral">Solo contacto directo</Badge>
 						{/if}
 					</div>
-					{#if empresa.categoria}
-						<p class="text-sm text-gray-400 dark:text-gray-500">{empresa.categoria}</p>
+					{#if empresa.rubro}
+						<p class="text-sm text-gray-400 dark:text-gray-500">{empresa.rubro}</p>
 					{/if}
 					{#if empresa.calificacion_promedio}
 						<div class="mt-1">
@@ -383,11 +398,23 @@
 			</div>
 
 			<div class="mt-6 flex flex-wrap items-center gap-3">
-				{#if empresa.turnos_habilitados !== false}
+				{#if empresa.turnos_habilitados !== false && !sinAgenda && puedeReservar}
 					<Button size="lg" onclick={() => empresa && goto(urlReservar(empresa))}>
 						Reservar turno
 					</Button>
+				{:else if empresa.turnos_habilitados !== false && !sinAgenda && esDueno}
+					<!-- El dueño no se reserva a sí mismo: agenda desde su panel. -->
+					<Button size="lg" href="/negocio">Ver mis turnos en Mi Negocio</Button>
+				{:else if empresa.turnos_habilitados !== false && !sinAgenda}
+					<p class="text-sm text-gray-500 dark:text-gray-400">
+						Las reservas online se hacen con una cuenta de cliente.
+					</p>
 				{:else if telefonos.length > 0}
+					{#if sinAgenda}
+						<p class="w-full text-sm text-gray-500 dark:text-gray-400">
+							Este comercio todavía no habilitó su agenda online: contactalo directamente.
+						</p>
+					{/if}
 					{#if empresa.modo_contacto !== 'mensaje'}
 						<Button size="lg" onclick={() => contactar('llamada', telefonos[0].numero)}
 							>Llamar</Button
@@ -403,29 +430,20 @@
 						</Button>
 					{/if}
 				{/if}
-				{#if empresa.instagram || empresa.facebook}
+				{#if redes.length > 0}
 					<span class="mx-1 h-6 w-px bg-gray-200 dark:bg-gray-700"></span>
 				{/if}
-				{#if empresa.instagram}
+				{#each redes as red (red.tipo)}
 					<a
-						href={empresa.instagram}
+						href={red.url}
 						target="_blank"
 						rel="noopener noreferrer"
 						class="flex items-center gap-1 text-sm text-brand-600 hover:underline dark:text-brand-400"
 					>
-						Instagram <ExternalLink class="h-3.5 w-3.5" />
+						{NOMBRE_RED[red.tipo] ?? red.tipo}
+						<ExternalLink class="h-3.5 w-3.5" />
 					</a>
-				{/if}
-				{#if empresa.facebook}
-					<a
-						href={empresa.facebook}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="flex items-center gap-1 text-sm text-brand-600 hover:underline dark:text-brand-400"
-					>
-						Facebook <ExternalLink class="h-3.5 w-3.5" />
-					</a>
-				{/if}
+				{/each}
 			</div>
 
 			{#if telefonos.length > 0}
@@ -435,10 +453,10 @@
 					</p>
 					<div class="flex flex-col gap-2">
 						{#each telefonos as tel, i (tel.numero + i)}
-							{@const canal = tel.modo_contacto ?? empresa.modo_contacto ?? 'ambos'}
+							{@const canal = tel.canal ?? empresa.modo_contacto ?? 'ambos'}
 							<div class="flex flex-wrap items-center gap-3">
 								<span class="text-sm text-gray-700 dark:text-gray-300">
-									{tel.etiqueta ? `${tel.etiqueta} — ` : ''}{formatearTelefono(tel.numero)}
+									{tel.descripcion ? `${tel.descripcion} — ` : ''}{formatearTelefono(tel.numero)}
 								</span>
 								{#if canal !== 'mensaje'}
 									<Button
@@ -585,6 +603,10 @@
 					<p class="text-sm text-gray-500 dark:text-gray-400">
 						No podés calificar tu propio comercio.
 					</p>
+				{:else if !puedeReservar}
+					<p class="text-sm text-gray-500 dark:text-gray-400">
+						Las calificaciones las dejan los clientes después de su turno.
+					</p>
 				{:else if turnosCalificables.length === 0}
 					<p class="text-sm text-gray-500 dark:text-gray-400">
 						Podés calificar este comercio después de tu turno.
@@ -677,18 +699,28 @@
 			<div
 				class="mt-5 flex flex-wrap items-center gap-4 border-t border-gray-100 pt-4 dark:border-gray-800"
 			>
-				{#if auth.user && !esDueno}
+				<!-- El superadmin es quien atiende los reportes: no se reporta a sí mismo. -->
+				{#if auth.user && !esDueno && !auth.isSuperAdmin}
 					<Button variant="danger" size="sm" onclick={() => (reportando = !reportando)}>
 						Reportar
 					</Button>
 				{/if}
 				{#if auth.isSuperAdmin}
-					<button
-						class="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-						onclick={alternarVerificado}
-					>
-						{empresa.verificado ? 'Quitar sello de verificado' : 'Otorgar sello de verificado'}
-					</button>
+					{#if empresa.verificado}
+						<button
+							class="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+							onclick={quitarVerificado}
+						>
+							Quitar sello de verificado
+						</button>
+					{:else}
+						<a
+							href="/admin"
+							class="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+						>
+							Revisar verificación en Admin
+						</a>
+					{/if}
 				{/if}
 				{#if mensajeSello}
 					<span class="text-xs text-danger-600">{mensajeSello}</span>
