@@ -29,6 +29,7 @@ npm run preview      # Previsualizar build
 npm run check        # Verificación de tipos (svelte-check + TypeScript)
 npm test             # Tests unitarios y de integración (Vitest + Testing Library)
 npm run test:coverage # Cobertura (reporte HTML en coverage/)
+npm run test:e2e     # E2E con Playwright (requiere `npx playwright install chromium`)
 ```
 
 > **Nota Windows:** el adapter Vercel crea symlinks en `.vercel/output/functions` al empaquetar. En Windows sin Modo Desarrollador puede fallar con `EPERM` solo en esa fase final; el build de SvelteKit (`vite build`) completa correctamente. En CI/CD Linux (Vercel) no ocurre.
@@ -42,7 +43,7 @@ Con `PUBLIC_MOCK_MODE=true` (valor por defecto documentado en `.env.example`), e
 - **Implementación:** `src/lib/api.ts` delega a `src/lib/mock/handler.ts` + datos seed en `src/lib/mock/data.ts` (27 rubros, 54 comercios, horarios, teléfonos, fotos, turnos).
 - **Activación:** copiar `.env.example` a `.env` — ya viene con `PUBLIC_MOCK_MODE=true`. No se requiere configurar `PUBLIC_API_URL`.
 - **Datos en memoria:** viven solo en la pestaña del navegador; **se resetean al recargar** la página. Ideal para recorrer todas las pantallas con contenido realista.
-- **Backend real (opcional):** para consumir el backend Rust/Axum o Express, poner `PUBLIC_MOCK_MODE=false` y apuntar `PUBLIC_API_URL=http://localhost:3001` con el backend corriendo.
+- **Backend real (opcional):** para consumir el backend Rust/Axum, poner `PUBLIC_MOCK_MODE=false` y apuntar `PUBLIC_API_URL=http://localhost:3001` con el backend corriendo.
 
 Variables de entorno (ver `.env.example`):
 
@@ -61,7 +62,7 @@ En modo mock **cualquier contraseña es válida** (no se valida). Usar estos ema
 | ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cliente@demo.com` | Cliente    | Buscar comercios, reservar turnos, favoritos, historial en `/cuenta`, mapa                                                                                       |
 | `negocio@demo.com` | Comercio   | Gestionar ficha, horarios, colaboradores, teléfonos múltiples, fotos, redes sociales, publicidades en `/negocio` (ficha pre-cargada: "Estilo Urbano Peluquería") |
-| `admin@demo.com`   | Superadmin | ABM de rubros/categorías y moderación en `/admin`                                                                                                                |
+| `admin@demo.com`   | Superadmin | Verificación de comercios, ABM de rubros/usuarios, publicidades, difusiones y reportes en `/admin`                                                               |
 
 También funciona cualquier otro email no listado — ingresará como `cliente`.
 
@@ -69,15 +70,15 @@ También funciona cualquier otro email no listado — ingresará como `cliente`.
 
 ## Funcionalidades Implementadas
 
-- **Directorio:** listado con búsqueda por nombre, filtro por rubro (17 rubros con reserva + 10 solo-contacto), tarjetas con calificación y badge de estado. El botón **"Cerca de mí"** (RF-07) pide ubicación con consentimiento, ordena por cercanía + abiertos primero desde el backend y muestra la distancia en cada tarjeta; las coordenadas quedan en la URL para compartir o volver atrás.
+- **Directorio:** listado con búsqueda unificada por nombre y rubro (con sinónimos y relevancia), filtro por rubro (17 rubros con reserva + 10 solo-contacto), tarjetas con calificación y badge de estado. El **mapa agrupa los comercios por zoom** (clusters por píxeles que se desagrupan al acercarse) y el listado sigue los límites visibles del mapa. El botón **"Cerca de mí"** (RF-07) pide ubicación con consentimiento, ordena por cercanía + abiertos primero desde el backend y muestra la distancia en cada tarjeta; las coordenadas quedan en la URL para compartir o volver atrás.
 - **Etiquetas (RF-18):** el comercio marca accesibilidad y servicios en `/negocio` (rampa, baño adaptado, apto celíacos, acepta mascotas, Wi-Fi, etc.); el directorio filtra por una o varias con semántica AND y el backend real las devuelve en el listado y la ficha.
 - **Ficha de comercio:** horarios semanales, teléfonos múltiples con Llamar/WhatsApp, fotos, Instagram/Facebook, mapa embebido, indicador abierto/cerrado, favoritos y ruta **"Cómo llegar"** (geolocalización + OSRM, con respaldo de Google Maps).
 - **Turnero:** selección de fecha → grilla de slots por duración configurable → confirmación; maneja solapamientos (409), feriados y filtrado de horas pasadas.
 - **Cancelación (RF-05):** el cliente cancela desde `/cuenta` con la anticipación del comercio y el dueño desde “Turnos recibidos” en `/negocio`; en ese caso se avisa al cliente y el horario queda libre. El panel sigue mostrando los turnos ya recibidos aunque el comercio desactive las reservas nuevas.
-- **Mostrador (RF-04):** el comercio registra atenciones sin reserva (fecha, cantidad, importe opcional, nota) y ve acumulados de hoy, del mes y totales, sin manejar cobros.
-- **Difusión (RF-06):** carrusel de destacados con botón compartir (Web Share / WhatsApp), colectas y eventos sin comercio, y canal público `/publicitar` sin registro con bandeja de pedidos en `/admin`.
-- **PWA y push (RNF-04):** manifest instalable, service worker con precache del build, navegación offline con respaldo en `static/offline.html` y tema de la app. El cliente activa notificaciones desde `/cuenta` (`lib/push.ts` + `POST /push/suscripciones`), y el service worker muestra avisos y abre su destino; el backend también envía recordatorios de turnos y el resumen semanal al comercio. El cliente configura la anticipación del recordatorio (1 h a 3 días, 24 h por defecto) desde la misma tarjeta de `/cuenta`. Requiere backend con `VAPID_PRIVATE_KEY` y HTTPS (o `localhost`); en modo mock la suscripción se simula pero no hay envíos reales.
-- **Dashboards:** Cliente (`/cuenta` — Mis Turnos / Favoritos), Comercio (`/negocio` — Mi Ficha / Horarios / Turnos recibidos / Mostrador / Calificaciones / Publicidades), Superadmin (`/admin` — ABM categorías, verificación, publicidades, solicitudes y reportes).
+- **Turnos de mostrador (RF-04):** el comercio agenda desde “Mis turnos” un turno para alguien sin cuenta (nombre, correo y nota opcionales). Usa la misma grilla y el mismo control de solapamientos que la reserva online, y se contabiliza en el resumen del período.
+- **Difusión (RF-06):** carrusel de destacados con botón compartir (Web Share / WhatsApp), colectas y eventos sin comercio, y canal público `/publicitar` sin registro con bandeja de difusiones en `/admin`.
+- **PWA y push (RNF-04):** manifest instalable, service worker con precache del build, navegación offline con respaldo en `static/offline.html` y tema de la app. El cliente activa notificaciones desde `/cuenta` (`lib/push.ts` + `POST /push/suscripciones`), y el service worker muestra avisos y abre su destino; el backend también envía recordatorios de turnos. El cliente configura la anticipación del recordatorio (1 h a 3 días, 24 h por defecto) desde la misma tarjeta de `/cuenta`, y el comercio calcula su resumen por período (hasta un año) para descargarlo en PDF desde `/negocio`. Requiere backend con `VAPID_PRIVATE_KEY` y HTTPS (o `localhost`); en modo mock la suscripción se simula pero no hay envíos reales.
+- **Dashboards:** Cliente (`/cuenta` — Mis Turnos / Favoritos), Comercio (`/negocio` — Mis turnos / Resumen / Calificaciones / Publicidades / Mi ficha / Horarios), Superadmin (`/admin` — Verificación / Comercios / Usuarios / Publicidades / Difusiones / Rubros / Reportes).
 - **Extras:** tema claro/oscuro + color de acento personalizable, autenticación JWT (mock), validaciones consistentes, manejo de errores y 401 con logout automático.
 
 **Estructura de rutas:**
@@ -110,7 +111,7 @@ src/routes/
 | **Lucide Icons**             | Iconografía (`@lucide/svelte`)                                                                                                    |
 | **Vite 8**                   | Bundler y dev server                                                                                                              |
 | **Vitest + Testing Library** | Tests unitarios, de componentes y de pantallas (`jsdom`)                                                                          |
-| **SweetAlert2**              | Diálogos de confirmación                                                                                                          |
+| **Playwright**               | Tests E2E de los flujos críticos (reserva, verificación, navegación y roles)                                                      |
 
 ---
 
@@ -121,6 +122,7 @@ npm run check         # svelte-check
 npm test              # una corrida (Vitest)
 npm run test:watch    # modo interactivo
 npm run test:coverage # reporte HTML en coverage/
+npm run test:e2e      # Playwright contra el build de preview
 ```
 
 Los tests no dependen del `.env` local: `src/tests/setup.ts` mockea `PUBLIC_API_URL` y `PUBLIC_MOCK_MODE`, y cada pantalla se prueba contra `api` simulado (`vi.mock('$lib/api')`). Cobertura incluye `src/lib/**` y `src/routes/**`.
