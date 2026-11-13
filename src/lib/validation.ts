@@ -5,15 +5,32 @@ export const required =
 	(value) =>
 		value.trim() === '' ? message : null;
 
+/**
+ * Misma regla que `email_valido` del backend: parte local de hasta 64 caracteres sin puntos al
+ * borde ni seguidos; dominio con etiquetas de letras, números y guiones, y terminación de 2+ letras.
+ */
+const LOCAL_EMAIL = /^[A-Za-z0-9._%+\-!#$&'*/=?^`{|}~]{1,64}$/;
+const ETIQUETA_DOMINIO = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+
+export function esEmailValido(valor: string): boolean {
+	const v = valor.trim();
+	const partes = v.split('@');
+	if (v.length > 254 || partes.length !== 2) return false;
+	const [local, dominio] = partes;
+	if (!LOCAL_EMAIL.test(local) || local.startsWith('.') || local.endsWith('.')) return false;
+	if (local.includes('..')) return false;
+	const etiquetas = dominio.split('.');
+	return (
+		etiquetas.length >= 2 &&
+		etiquetas.every((e) => ETIQUETA_DOMINIO.test(e)) &&
+		/^[A-Za-z]{2,}$/.test(etiquetas[etiquetas.length - 1])
+	);
+}
+
 export const email =
 	(message = 'Ingresá un correo electrónico válido'): Validator =>
 	(value) =>
-		value.trim() === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? null : message;
-
-export const phone =
-	(message = 'Ingresá un teléfono válido'): Validator =>
-	(value) =>
-		value.trim() === '' || /^[\d\s()+-]{6,20}$/.test(value) ? null : message;
+		value.trim() === '' || esEmailValido(value) ? null : message;
 
 /**
  * Validación dura para guardar teléfonos (RF-02): solo dígitos, sin guiones,
@@ -61,11 +78,6 @@ export const cuit =
 		if (v === '') return null;
 		return esCuitValido(v) ? null : message;
 	};
-
-export const minLength =
-	(min: number, message = `Debe tener al menos ${min} caracteres`): Validator =>
-	(value) =>
-		value.trim() === '' || value.trim().length >= min ? null : message;
 
 /**
  * Contraseña segura: mínimo 8 caracteres con mayúscula, minúscula y número.

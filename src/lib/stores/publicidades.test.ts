@@ -1,48 +1,112 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { conModoMock } from '../../tests/helpers';
+import type { Difusion } from '$lib/types';
 
-const api = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+const api = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() };
 
-async function cargar(modo: 'true' | 'false') {
+async function cargar() {
 	vi.doMock('$lib/api', () => ({ api }));
-	return (await conModoMock(modo, () => import('./publicidades.svelte'))).publicidades;
+	return (await conModoMock('false', () => import('./publicidades.svelte'))).publicidades;
 }
 
-const nueva = { empresa_id: 4, titulo: '2x1', descripcion: 'Este mes', imagen_url: '' };
+const nueva = {
+	empresa_id: 4,
+	titulo: '2x1',
+	descripcion: 'Este mes',
+	url_imagen: 'https://x.com/a.jpg'
+};
+const difusion: Difusion = {
+	id: 7,
+	tipo: 'colecta',
+	titulo: 'Colecta',
+	descripcion: 'Juntamos abrigos',
+	url_imagen: null,
+	solicitante_nombre: 'Club',
+	solicitante_contacto: 'club@x.com',
+	estado: 'aprobada',
+	creado_en: '2026-11-01T10:00:00Z'
+};
+
+function backend(publicidades: unknown[] = [], difusiones: unknown[] = []) {
+	api.get.mockImplementation(async (url: string) =>
+		url === '/difusiones' ? difusiones : url.startsWith('/publicidades') ? publicidades : []
+	);
+}
 
 beforeEach(() => {
-	api.get.mockReset().mockResolvedValue([]);
+	api.get.mockReset();
+	backend();
 	api.post.mockReset();
+	api.put.mockReset();
 	api.delete.mockReset().mockResolvedValue({});
 });
 
-describe('publicidades con backend real', () => {
-	it('al cargar pide la lista al backend', async () => {
-		api.get.mockResolvedValue([{ id: '1', ...nueva }]);
-		const store = await cargar('false');
+describe('carrusel de publicidades y difusiones (RF-06)', () => {
+	it('al cargar pide las publicidades y las difusiones vigentes', async () => {
+		backend([{ id: '1', ...nueva, estado: 'aprobada' }], [difusion]);
+		const store = await cargar();
 		await vi.waitFor(() => expect(store.items).toHaveLength(1));
 		expect(api.get).toHaveBeenCalledWith('/publicidades');
+		expect(api.get).toHaveBeenCalledWith('/difusiones');
+		expect(store.difusiones).toHaveLength(1);
 	});
 
-	it('crear publica en el backend y la muestra primero', async () => {
-		api.get.mockResolvedValue([{ id: '1', ...nueva, titulo: 'vieja' }]);
-		api.post.mockResolvedValue({ id: '2', ...nueva });
-		const store = await cargar('false');
-		await vi.waitFor(() => expect(store.items).toHaveLength(1));
-		store.crear(nueva);
-		await vi.waitFor(() => expect(store.items).toHaveLength(2));
+	it('el carrusel pone primero los comercios y después las difusiones, sin ficha', async () => {
+		backend([{ id: '1', ...nueva, estado: 'aprobada' }], [difusion]);
+		const store = await cargar();
+		await vi.waitFor(() => expect(store.carrusel).toHaveLength(2));
+		expect(store.carrusel[0].empresa_id).toBe(4);
+		expect(store.carrusel[1]).toMatchObject({
+			id: 'difusion-7',
+			empresa_id: null,
+			titulo: 'Colecta'
+		});
+		// sin imagen propia, la difusión usa una de relleno
+		expect(store.carrusel[1].url_imagen).toMatch(/^https:\/\//);
+	});
+
+	it('crear: la del dueño queda pendiente y no entra al carrusel', async () => {
+		api.post.mockResolvedValue({ id: '2', ...nueva, estado: 'pendiente' });
+		const store = await cargar();
+		const creada = await store.crear(nueva);
 		expect(api.post).toHaveBeenCalledWith('/publicidades', nueva);
-		expect(store.items[0].id).toBe('2');
+		expect(creada.estado).toBe('pendiente');
+		expect(store.items).toEqual([]);
+	});
+
+	it('crear: la del superadmin queda aprobada y se muestra primero', async () => {
+		backend([{ id: '1', ...nueva, titulo: 'vieja', estado: 'aprobada' }]);
+		api.post.mockResolvedValue({ id: '2', ...nueva, estado: 'aprobada' });
+		const store = await cargar();
+		await vi.waitFor(() => expect(store.items).toHaveLength(1));
+		await store.crear(nueva);
+		expect(store.items.map((p) => p.id)).toEqual(['2', '1']);
+	});
+
+	it('cambiar el estado la saca del carrusel si deja de estar aprobada', async () => {
+		backend([{ id: '1', ...nueva, estado: 'aprobada' }]);
+		api.put.mockResolvedValue({ id: '1', ...nueva, estado: 'finalizada' });
+		const store = await cargar();
+		await vi.waitFor(() => expect(store.items).toHaveLength(1));
+		await store.cambiarEstado('1', 'finalizada');
+		expect(api.put).toHaveBeenCalledWith('/publicidades/1/estado', { estado: 'finalizada' });
+		expect(store.items).toEqual([]);
+	});
+
+	it('delComercio pide todas las del comercio, en cualquier estado', async () => {
+		const store = await cargar();
+		await store.delComercio(4);
+		expect(api.get).toHaveBeenCalledWith('/publicidades?empresa_id=4&estado=todas');
 	});
 
 	it('eliminar la saca de la lista y borra en el backend', async () => {
-		api.get.mockResolvedValue([
-			{ id: '1', ...nueva },
-			{ id: '2', ...nueva, empresa_id: 5 }
+		backend([
+			{ id: '1', ...nueva, estado: 'aprobada' },
+			{ id: '2', ...nueva, empresa_id: 5, estado: 'aprobada' }
 		]);
-		const store = await cargar('false');
+		const store = await cargar();
 		await vi.waitFor(() => expect(store.items).toHaveLength(2));
-		store.eliminar('1');
+		await store.eliminar('1');
 		expect(store.items.map((p) => p.id)).toEqual(['2']);
 		expect(api.delete).toHaveBeenCalledWith('/publicidades/1');
 	});
@@ -50,50 +114,8 @@ describe('publicidades con backend real', () => {
 	it('si el backend falla al cargar, no rompe: queda vacío', async () => {
 		api.get.mockRejectedValue(new Error('sin conexión'));
 		const consola = vi.spyOn(console, 'error').mockImplementation(() => {});
-		const store = await cargar('false');
+		const store = await cargar();
 		await vi.waitFor(() => expect(consola).toHaveBeenCalled());
-		expect(store.items).toEqual([]);
-	});
-
-	it('porEmpresa filtra por comercio', async () => {
-		api.get.mockResolvedValue([
-			{ id: '1', ...nueva, empresa_id: 4 },
-			{ id: '2', ...nueva, empresa_id: 5 }
-		]);
-		const store = await cargar('false');
-		await vi.waitFor(() => expect(store.items).toHaveLength(2));
-		expect(store.porEmpresa(5).map((p) => p.id)).toEqual(['2']);
-	});
-});
-
-describe('publicidades en modo mock (localStorage)', () => {
-	it('la primera vez precarga ejemplos y los guarda', async () => {
-		const store = await cargar('true');
-		expect(store.items.length).toBeGreaterThanOrEqual(10);
-		expect(JSON.parse(localStorage.getItem('publicidades')!)).toHaveLength(store.items.length);
-		expect(api.get).not.toHaveBeenCalled();
-	});
-
-	it('respeta lo que ya había guardado', async () => {
-		localStorage.setItem('publicidades', JSON.stringify([{ id: 'x', ...nueva }]));
-		const store = await cargar('true');
-		expect(store.items).toHaveLength(1);
-	});
-
-	it('crear y eliminar persisten', async () => {
-		localStorage.setItem('publicidades', '[]');
-		const store = await cargar('true');
-		const creada = store.crear(nueva)!;
-		expect(creada.id).toBeTruthy();
-		expect(JSON.parse(localStorage.getItem('publicidades')!)).toHaveLength(1);
-		store.eliminar(creada.id);
-		expect(store.items).toEqual([]);
-		expect(JSON.parse(localStorage.getItem('publicidades')!)).toEqual([]);
-	});
-
-	it('un JSON guardado corrupto no rompe la app', async () => {
-		localStorage.setItem('publicidades', '{roto');
-		const store = await cargar('true');
-		expect(store.items).toEqual([]);
+		expect(store.carrusel).toEqual([]);
 	});
 });

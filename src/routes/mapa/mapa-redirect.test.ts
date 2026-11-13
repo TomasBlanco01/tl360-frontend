@@ -8,10 +8,10 @@ function url(path: string) {
 }
 
 describe('redirect /mapa → /comercios?vista=mapa', () => {
-	it('redirige 308 conservando q y traduciendo categoria_id → categoria', () => {
+	it('redirige 308 conservando q y traduciendo rubro_id → categoria', () => {
 		let destino = '';
 		try {
-			load({ url: url('/mapa?q=cafe&categoria_id=2&etiquetas=rampa') } as never);
+			load({ url: url('/mapa?q=cafe&rubro_id=2&etiquetas=rampa') } as never);
 		} catch (e) {
 			// SvelteKit representa el redirect como objeto con location/status.
 			destino = (e as { location: string }).location ?? String(e);

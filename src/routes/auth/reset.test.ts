@@ -39,18 +39,19 @@ describe('página de nueva contraseña', () => {
 		expect(screen.queryByLabelText(/Nueva contraseña/)).not.toBeInTheDocument();
 	});
 
-	it('exige al menos 6 caracteres', async () => {
+	it('exige una contraseña segura y muestra las condiciones', async () => {
 		setUrl('/auth/reset?token=abc');
 		render(Reset);
 		await completar('123', '123');
-		expect(await screen.findByText('Debe tener al menos 6 caracteres')).toBeInTheDocument();
+		expect(await screen.findByText(/al menos 8 caracteres e incluir/)).toBeInTheDocument();
+		expect(screen.getByText('Una letra mayúscula')).toBeInTheDocument();
 		expect(post).not.toHaveBeenCalled();
 	});
 
 	it('exige que las dos contraseñas coincidan', async () => {
 		setUrl('/auth/reset?token=abc');
 		render(Reset);
-		await completar('clave-nueva', 'clave-distinta');
+		await completar('ClaveNueva1', 'ClaveOtra1');
 		expect(await screen.findByText('Las contraseñas no coinciden')).toBeInTheDocument();
 		expect(post).not.toHaveBeenCalled();
 	});
@@ -59,11 +60,11 @@ describe('página de nueva contraseña', () => {
 		setUrl('/auth/reset?token=tok-123');
 		post.mockResolvedValue({ message: 'ok' });
 		render(Reset);
-		await completar('clave-nueva', 'clave-nueva');
+		await completar('ClaveNueva1', 'ClaveNueva1');
 		await waitFor(() => expect(goto).toHaveBeenCalledWith('/auth/login'));
 		expect(post).toHaveBeenCalledWith('/auth/reset-password', {
 			token: 'tok-123',
-			contraseña: 'clave-nueva'
+			contraseña: 'ClaveNueva1'
 		});
 	});
 
@@ -71,7 +72,7 @@ describe('página de nueva contraseña', () => {
 		setUrl('/auth/reset?token=viejo');
 		post.mockRejectedValue(new ApiError(400, 'El enlace de recuperación es inválido o venció'));
 		render(Reset);
-		await completar('clave-nueva', 'clave-nueva');
+		await completar('ClaveNueva1', 'ClaveNueva1');
 		expect(
 			await screen.findByText('El enlace de recuperación es inválido o venció')
 		).toBeInTheDocument();

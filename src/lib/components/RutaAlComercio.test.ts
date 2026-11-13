@@ -55,6 +55,12 @@ describe('RutaAlComercio', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Cómo llegar a Estilo Urbano' }));
 
 		expect(await screen.findByRole('status')).toHaveTextContent('3,2 km · 8 min en auto');
+		expect(screen.getByRole('status')).toHaveTextContent('aproximado');
+		// Calculada la ruta, Google Maps sigue disponible (con el origen del usuario).
+		expect(screen.getByRole('link', { name: /Google Maps/ })).toHaveAttribute(
+			'href',
+			expect.stringContaining('origin=-35.97%2C-62.73')
+		);
 		expect(onruta).toHaveBeenCalledWith(
 			expect.objectContaining({
 				geometria: [

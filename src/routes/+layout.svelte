@@ -3,13 +3,43 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { navigating } from '$app/state';
 	import NavBar from '$lib/components/NavBar.svelte';
-	import Toaster from '$lib/_auditoria/Toaster.svelte';
+	import Toaster from '$lib/components/Toaster.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 
 	let { children } = $props();
 
 	theme.apply();
+
+	let lenta = $state(false);
+	$effect(() => {
+		if (!navigating.to) {
+			lenta = false;
+			return;
+		}
+		const t = setTimeout(() => (lenta = true), 250);
+		return () => clearTimeout(t);
+	});
 </script>
+
+<style>
+	.barra-carga {
+		animation: barra-carga 1.1s ease-in-out infinite;
+	}
+	@keyframes barra-carga {
+		from {
+			transform: translateX(-100%);
+		}
+		to {
+			transform: translateX(300%);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.barra-carga {
+			animation: none;
+			width: 100%;
+		}
+	}
+</style>
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
@@ -34,10 +64,17 @@
 	class="min-h-screen bg-white text-gray-800 transition-colors duration-300 dark:bg-gray-950 dark:text-gray-100"
 >
 	<NavBar />
-	{#if navigating}
-		<p role="status" class="mx-auto max-w-6xl px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-			Cargando...
-		</p>
+	<!-- `navigating` de $app/state siempre es un objeto: se navega solo cuando tiene destino.
+	     Barra fina fija arriba (no empuja el contenido) y solo si la navegación tarda: las
+	     navegaciones rápidas no muestran nada. -->
+	{#if lenta}
+		<div
+			role="progressbar"
+			aria-label="Cargando la página"
+			class="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-brand-100 dark:bg-gray-800"
+		>
+			<div class="barra-carga h-full w-1/3 bg-brand-500"></div>
+		</div>
 	{/if}
 	<main id="contenido">
 		{@render children()}

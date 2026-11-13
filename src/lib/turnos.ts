@@ -13,7 +13,15 @@ export const FERIADOS = [
 const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 /** Días de la semana en el orden en que se muestran (Lunes a Domingo). */
-export const DIAS_ORDEN = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+export const DIAS_ORDEN = [
+	'Lunes',
+	'Martes',
+	'Miércoles',
+	'Jueves',
+	'Viernes',
+	'Sábado',
+	'Domingo'
+];
 
 export function nombreDia(fechaISO: string): string {
 	const [a, m, d] = fechaISO.split('-').map(Number);
@@ -74,7 +82,8 @@ export function slotsDelDia(
 	let todos: string[] = [];
 	rangos.forEach((r) => (todos = [...todos, ...generarSlots(r, pasoMin)]));
 
-	const hoyISO = new Date().toISOString().split('T')[0];
+	const ahora = new Date();
+	const hoyISO = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
 	if (fechaISO === hoyISO) {
 		const horaActual = new Date().toTimeString().slice(0, 5);
 		todos = todos.filter((hora) => hora > horaActual);

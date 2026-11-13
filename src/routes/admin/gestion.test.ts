@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { ApiError, api } from '$lib/api';
 import { auth } from '$lib/stores/auth.svelte';
-import { toast } from '$lib/_auditoria/toast.svelte';
+import { toast } from '$lib/components/toast.svelte';
 import Admin from './+page.svelte';
 
 vi.mock('$lib/api', async (original) => {
@@ -25,40 +25,67 @@ const comercios = [
 	{
 		id: 7,
 		nombre: 'Estilo Urbano',
-		categoria: 'Peluquerías',
-		categoria_id: 1,
+		rubro: 'Peluquerías',
+		rubro_id: 1,
 		direccion: 'Villegas 482',
-		telefono: '2392411234',
+		telefonos: [{ id: 1, numero: '2392411234', principal: true }],
 		slogan: 'Cortes y color',
-		admin_id: 3,
+		usuario_id: 3,
 		verificado: true,
 		slug: 'estilo-urbano'
 	},
 	{
 		id: 8,
 		nombre: 'Gym Norte',
-		categoria: 'Gimnasios',
-		categoria_id: 2,
+		rubro: 'Gimnasios',
+		rubro_id: 2,
 		direccion: 'Roca 10',
-		admin_id: null,
+		usuario_id: null,
 		verificado: false,
 		slug: 'gym-norte'
 	}
 ];
 
 const usuarios = [
-	{ id: 1, nombre: 'Admin TL360', email: 'admin@demo.com', rol: 'superadmin' },
-	{ id: 3, nombre: 'Sofía Ramírez', email: 'negocio@demo.com', rol: 'admin' },
-	{ id: 9, nombre: 'Martina Gómez', email: 'cliente@demo.com', rol: 'cliente' }
+	{
+		id: 1,
+		nombre: 'Admin TL360',
+		email: 'admin@demo.com',
+		rol: 'superadmin',
+		email_verificado: true
+	},
+	{
+		id: 3,
+		nombre: 'Sofía Ramírez',
+		email: 'negocio@demo.com',
+		rol: 'admin',
+		email_verificado: true
+	},
+	{
+		id: 9,
+		nombre: 'Martina Gómez',
+		email: 'cliente@demo.com',
+		rol: 'cliente',
+		email_verificado: false
+	}
 ];
 
 const publicidades = [
-	{ id: 4, empresa_id: 7, titulo: '20% en cortes', descripcion: 'Todo octubre' },
 	{
-		id: 5,
-		empresa_id: null,
-		titulo: 'Colecta para el hospital',
-		descripcion: 'Insumos pediátricos'
+		id: 4,
+		empresa_id: 7,
+		empresa_nombre: 'Peluquería Central',
+		titulo: '20% en cortes',
+		descripcion: 'Todo octubre',
+		estado: 'pendiente'
+	},
+	{
+		id: 6,
+		empresa_id: 8,
+		empresa_nombre: 'Gym Norte',
+		titulo: 'Promo vieja',
+		descripcion: 'Septiembre',
+		estado: 'aprobada'
 	}
 ];
 
@@ -73,11 +100,24 @@ const turnos = [
 ];
 
 function backend(url: string) {
-	if (url === '/categorias') return rubros;
+	if (url === '/rubros') return rubros;
 	if (url.startsWith('/empresas?verificado_estado=')) return [];
 	if (/^\/empresas\/\d+\/turnos$/.test(url)) return url === '/empresas/7/turnos' ? turnos : [];
 	if (url.startsWith('/empresas')) return comercios;
-	if (url === '/usuarios') return usuarios;
+	if (url.startsWith('/usuarios')) {
+		// Igual que el backend: buscador, rol, ids y paginado.
+		const p = new URL(url, 'http://x').searchParams;
+		const q = (p.get('q') ?? '').toLowerCase();
+		const ids = p.get('ids')?.split(',').map(Number);
+		const lista = usuarios.filter(
+			(u) =>
+				(!q || u.nombre.toLowerCase().includes(q) || u.email.includes(q)) &&
+				(!p.get('rol') || u.rol === p.get('rol')) &&
+				(!ids || ids.includes(u.id))
+		);
+		const desde = Number(p.get('offset') ?? 0);
+		return lista.slice(desde, desde + Number(p.get('limit') ?? 1000));
+	}
 	if (url.startsWith('/publicidades')) return publicidades;
 	return [];
 }
@@ -107,46 +147,81 @@ describe('solapa Comercios', () => {
 			'/comercios/estilo-urbano'
 		);
 		expect(within(fila('Estilo Urbano')).getByText('Verificado')).toBeInTheDocument();
-		expect(within(fila('Estilo Urbano')).getByText(/dueño #3/)).toBeInTheDocument();
+		// El dueño se muestra por nombre (no por id), pidiendo los nombres juntos.
+		expect(
+			await within(fila('Estilo Urbano')).findByText(/dueño: Sofía Ramírez/)
+		).toBeInTheDocument();
 		expect(within(fila('Gym Norte')).getByText('Sin verificar')).toBeInTheDocument();
-		expect(within(fila('Gym Norte')).getByText(/dueño #—/)).toBeInTheDocument();
-		expect(get).toHaveBeenCalledWith('/empresas');
+		expect(within(fila('Gym Norte')).getByText(/dueño: sin asignar/)).toBeInTheDocument();
+		expect(get).toHaveBeenCalledWith('/empresas?limit=21&offset=0');
+		expect(get).toHaveBeenCalledWith('/usuarios?ids=3');
 	});
 
-	it('busca por texto y categoría', async () => {
+	it('busca por texto y rubro', async () => {
 		await abrir('Comercios');
 		await screen.findByText('Estilo Urbano');
 		await userEvent.type(screen.getByLabelText('Buscar'), ' gym ');
-		await userEvent.selectOptions(screen.getByLabelText('Categoría'), 'Gimnasios');
+		await userEvent.type(screen.getByRole('combobox', { name: 'Filtrar por rubro' }), 'gim');
+		await userEvent.click(screen.getByRole('option', { name: 'Gimnasios' }));
 		await userEvent.click(screen.getByRole('button', { name: 'Buscar' }));
-		await vi.waitFor(() => expect(get).toHaveBeenCalledWith('/empresas?q=gym&categoria_id=2'));
+		await vi.waitFor(() =>
+			expect(get).toHaveBeenCalledWith('/empresas?q=gym&rubro_id=2&limit=21&offset=0')
+		);
 	});
 
 	it('si falla la carga muestra el motivo', async () => {
 		get.mockImplementation(async (url: string) => {
-			if (url === '/empresas') throw new ApiError(500, 'Servicio no disponible');
+			if (url === '/empresas?limit=21&offset=0') throw new ApiError(500, 'Servicio no disponible');
 			return backend(url);
 		});
 		await abrir('Comercios');
 		expect(await screen.findByText('Servicio no disponible')).toBeInTheDocument();
 	});
 
+	it('pagina los comercios de a 20', async () => {
+		const muchos = Array.from({ length: 21 }, (_, i) => ({
+			...comercios[0],
+			id: 100 + i,
+			slug: `c-${i}`,
+			nombre: `Comercio ${i + 1}`
+		}));
+		get.mockImplementation(async (url: string) =>
+			url === '/empresas?limit=21&offset=0'
+				? muchos
+				: url === '/empresas?limit=21&offset=20'
+					? [{ ...comercios[0], id: 999, slug: 'ultimo', nombre: 'Comercio final' }]
+					: backend(url)
+		);
+		await abrir('Comercios');
+		expect(await screen.findByText('Comercio 20')).toBeInTheDocument();
+		expect(screen.queryByText('Comercio 21')).not.toBeInTheDocument();
+		const paginas = screen.getByRole('navigation', { name: 'Páginas de comercios' });
+		expect(within(paginas).getByRole('button', { name: '← Anterior' })).toBeDisabled();
+		await userEvent.click(within(paginas).getByRole('button', { name: 'Siguiente →' }));
+		expect(await screen.findByText('Comercio final')).toBeInTheDocument();
+		const paginas2 = screen.getByRole('navigation', { name: 'Páginas de comercios' });
+		expect(within(paginas2).getByText('Página 2')).toBeInTheDocument();
+		expect(within(paginas2).getByRole('button', { name: 'Siguiente →' })).toBeDisabled();
+	});
+
 	it('sin resultados lo indica', async () => {
-		get.mockImplementation(async (url: string) => (url === '/empresas' ? [] : backend(url)));
+		get.mockImplementation(async (url: string) =>
+			url === '/empresas?limit=21&offset=0' ? [] : backend(url)
+		);
 		await abrir('Comercios');
 		expect(await screen.findByText(/No hay comercios para este filtro/)).toBeInTheDocument();
 	});
 
 	describe('alta', () => {
-		it('exige nombre, dirección y categoría', async () => {
+		it('exige nombre, dirección y rubro', async () => {
 			await abrir('Comercios');
 			await userEvent.click(screen.getByRole('button', { name: 'Nuevo comercio' }));
 			await userEvent.click(screen.getByRole('button', { name: 'Crear comercio' }));
 			expect(await screen.findByText('Nombre y dirección son obligatorios.')).toBeInTheDocument();
-			await userEvent.type(screen.getByLabelText('Nombre *'), 'Kiosco Sur');
+			await userEvent.type(screen.getByLabelText(/^Nombre ?[*]$/), 'Kiosco Sur');
 			await userEvent.type(screen.getByLabelText('Dirección *'), 'Mitre 20');
 			await userEvent.click(screen.getByRole('button', { name: 'Crear comercio' }));
-			expect(await screen.findByText('Elegí una categoría.')).toBeInTheDocument();
+			expect(await screen.findByText('Elegí un rubro.')).toBeInTheDocument();
 			expect(post).not.toHaveBeenCalled();
 		});
 
@@ -154,35 +229,45 @@ describe('solapa Comercios', () => {
 			await abrir('Comercios');
 			await screen.findByText('Estilo Urbano');
 			await userEvent.click(screen.getByRole('button', { name: 'Nuevo comercio' }));
-			await userEvent.type(screen.getByLabelText('Nombre *'), ' Kiosco Sur ');
+			await userEvent.type(screen.getByLabelText(/^Nombre ?[*]$/), ' Kiosco Sur ');
 			await userEvent.type(screen.getByLabelText('Dirección *'), 'Mitre 20');
-			await userEvent.selectOptions(screen.getByLabelText('Categoría *'), 'Gimnasios');
-			await userEvent.type(screen.getByLabelText('ID dueño (admin_id)'), '5');
-			await userEvent.click(screen.getByLabelText('Acepta reservas de turnos'));
+			await userEvent.click(screen.getByRole('combobox', { name: /^Rubro/ }));
+			await userEvent.click(screen.getByRole('option', { name: 'Gimnasios' }));
+			// El dueño se busca por nombre, no por id.
+			await userEvent.type(screen.getByRole('combobox', { name: 'Dueño del comercio' }), 'sof');
+			await userEvent.click(await screen.findByRole('option', { name: /Sofía Ramírez/ }));
+			expect(get).toHaveBeenCalledWith('/usuarios?rol=admin&limit=8&q=sof');
+			// Sin horarios cargados no hay reservas: el alta nace sin turnos online.
+			expect(screen.getByLabelText(/Acepta reservas de turnos/)).not.toBeChecked();
 			await userEvent.click(screen.getByRole('button', { name: 'Crear comercio' }));
 			await vi.waitFor(() =>
-				expect(post).toHaveBeenCalledWith('/empresas', {
-					nombre: 'Kiosco Sur',
-					direccion: 'Mitre 20',
-					categoria_id: 2,
-					admin_id: 5,
-					turnos_habilitados: false
-				})
+				expect(post).toHaveBeenCalledWith(
+					'/empresas',
+					expect.objectContaining({
+						nombre: 'Kiosco Sur',
+						direccion: 'Mitre 20',
+						rubro_id: 2,
+						usuario_id: 3,
+						turnos_habilitados: false,
+						telefonos: []
+					})
+				)
 			);
-			await vi.waitFor(() => expect(llamadasA('/empresas')).toBe(2));
+			await vi.waitFor(() => expect(llamadasA('/empresas?limit=21&offset=0')).toBe(2));
 			expect(screen.queryByRole('button', { name: 'Crear comercio' })).not.toBeInTheDocument();
 			expect(avisos()).toContain('Comercio creado.');
 		});
 
 		it('si el backend lo rechaza muestra el motivo', async () => {
-			post.mockRejectedValue(new ApiError(400, 'La categoría indicada no existe'));
+			post.mockRejectedValue(new ApiError(400, 'El rubro indicado no existe'));
 			await abrir('Comercios');
 			await userEvent.click(screen.getByRole('button', { name: 'Nuevo comercio' }));
-			await userEvent.type(screen.getByLabelText('Nombre *'), 'Kiosco Sur');
+			await userEvent.type(screen.getByLabelText(/^Nombre ?[*]$/), 'Kiosco Sur');
 			await userEvent.type(screen.getByLabelText('Dirección *'), 'Mitre 20');
-			await userEvent.selectOptions(screen.getByLabelText('Categoría *'), 'Peluquerías');
+			await userEvent.type(screen.getByRole('combobox', { name: /^Rubro/ }), 'pelu');
+			await userEvent.click(screen.getByRole('option', { name: 'Peluquerías' }));
 			await userEvent.click(screen.getByRole('button', { name: 'Crear comercio' }));
-			expect(await screen.findByText('La categoría indicada no existe')).toBeInTheDocument();
+			expect(await screen.findByText('El rubro indicado no existe')).toBeInTheDocument();
 		});
 	});
 
@@ -195,7 +280,12 @@ describe('solapa Comercios', () => {
 			const nombre = screen.getByLabelText('Nombre del comercio');
 			expect(nombre).toHaveValue('Estilo Urbano');
 			expect(screen.getByLabelText('Teléfono del comercio')).toHaveValue('2392411234');
-			expect(screen.getByLabelText('ID dueño del comercio')).toHaveValue('3');
+			expect(
+				await screen.findByText('Sofía Ramírez', { selector: 'span *, span' })
+			).toBeInTheDocument();
+			expect(screen.getByRole('combobox', { name: 'Rubro del comercio' })).toHaveValue(
+				'Peluquerías'
+			);
 			await userEvent.clear(nombre);
 			await userEvent.type(nombre, 'Estilo Urbano Peluquería');
 			await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
@@ -203,10 +293,9 @@ describe('solapa Comercios', () => {
 				expect(put).toHaveBeenCalledWith('/empresas/7', {
 					nombre: 'Estilo Urbano Peluquería',
 					direccion: 'Villegas 482',
-					telefono: '2392411234',
 					slogan: 'Cortes y color',
-					categoria_id: 1,
-					admin_id: 3
+					rubro_id: 1,
+					usuario_id: 3
 				})
 			);
 			expect(
@@ -221,7 +310,7 @@ describe('solapa Comercios', () => {
 			await userEvent.clear(screen.getByLabelText('Nombre del comercio'));
 			await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
 			expect(put).not.toHaveBeenCalled();
-			expect(avisos()).toContain('Nombre, dirección y categoría son obligatorios.');
+			expect(avisos()).toContain('Nombre, dirección y rubro son obligatorios.');
 		});
 
 		it('cancelar vuelve a la lista sin guardar', async () => {
@@ -234,13 +323,13 @@ describe('solapa Comercios', () => {
 		});
 
 		it('si el backend rechaza la edición lo informa', async () => {
-			put.mockRejectedValue(new ApiError(403, 'No podés editar una empresa que no es tuya'));
+			put.mockRejectedValue(new ApiError(403, 'No tenés los permisos para realizar esta acción'));
 			await abrir('Comercios');
 			await screen.findByText('Estilo Urbano');
 			await userEvent.click(within(fila('Estilo Urbano')).getByRole('button', { name: 'Editar' }));
 			await userEvent.click(screen.getByRole('button', { name: 'Guardar' }));
 			await vi.waitFor(() =>
-				expect(avisos()).toContain('No podés editar una empresa que no es tuya')
+				expect(avisos()).toContain('No tenés los permisos para realizar esta acción')
 			);
 		});
 	});
@@ -283,6 +372,34 @@ describe('solapa Comercios', () => {
 			await userEvent.click(within(fila('Gym Norte')).getByRole('button', { name: 'Ver turnos' }));
 			expect(await screen.findByText('Sin turnos próximos.')).toBeInTheDocument();
 		});
+
+		it('con muchos turnos muestra unos pocos y el resto en un modal', async () => {
+			const muchos = Array.from({ length: 8 }, (_, i) => ({
+				id: 100 + i,
+				fecha: i < 6 ? '2026-11-03' : '2026-11-04',
+				hora: `1${i}:00`,
+				estado: 'confirmado',
+				cliente_nombre: `Cliente ${i}`
+			}));
+			get.mockImplementation(async (url: string) =>
+				url === '/empresas/7/turnos' ? muchos : backend(url)
+			);
+			await abrir('Comercios');
+			await screen.findByText('Estilo Urbano');
+			await userEvent.click(
+				within(fila('Estilo Urbano')).getByRole('button', { name: 'Ver turnos' })
+			);
+			expect(await screen.findByText(/Cliente 4 · confirmado/)).toBeInTheDocument();
+			expect(screen.queryByText(/Cliente 5 · confirmado/)).not.toBeInTheDocument();
+			await userEvent.click(screen.getByRole('button', { name: 'Ver todos (8)' }));
+			const modal = screen.getByRole('dialog', { name: 'Turnos de Estilo Urbano' });
+			expect(within(modal).getByText('Cliente 7')).toBeInTheDocument();
+			await userEvent.type(within(modal).getByLabelText('Día'), '2026-11-04');
+			expect(within(modal).queryByText('Cliente 0')).not.toBeInTheDocument();
+			expect(within(modal).getByText('2 de 8')).toBeInTheDocument();
+			await userEvent.click(within(modal).getByRole('button', { name: 'Cerrar' }));
+			expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+		});
 	});
 
 	describe('baja', () => {
@@ -317,21 +434,97 @@ describe('solapa Comercios', () => {
 });
 
 describe('solapa Usuarios', () => {
-	it('lista los usuarios con correo, id y rol', async () => {
+	it('lista los usuarios con correo, rol y estado del correo (sin ids)', async () => {
 		await abrir('Usuarios');
 		expect(await screen.findByText('Sofía Ramírez')).toBeInTheDocument();
-		expect(screen.getByText('negocio@demo.com · #3')).toBeInTheDocument();
-		expect(within(fila('Admin TL360')).getByText('superadmin')).toBeInTheDocument();
-		expect(within(fila('Martina Gómez')).getByText('cliente')).toBeInTheDocument();
+		expect(screen.getByText('negocio@demo.com')).toBeInTheDocument();
+		expect(screen.queryByText(/#3/)).not.toBeInTheDocument();
+		expect(screen.getByLabelText('Rol de Sofía Ramírez')).toHaveValue('admin');
+		expect(screen.getByLabelText('Rol de Martina Gómez')).toHaveValue('cliente');
+		// La propia cuenta no se puede cambiar de rol.
+		expect(screen.getByLabelText('Rol de Admin TL360')).toBeDisabled();
+		expect(within(fila('Martina Gómez')).getByText('Correo sin verificar')).toBeInTheDocument();
+		expect(
+			within(fila('Sofía Ramírez')).queryByText('Correo sin verificar')
+		).not.toBeInTheDocument();
+	});
+
+	it('confirma el correo de quien no recibió el enlace', async () => {
+		put.mockResolvedValue({ ...usuarios[2], email_verificado: true });
+		await abrir('Usuarios');
+		await screen.findByText('Martina Gómez');
+		await userEvent.click(
+			within(fila('Martina Gómez')).getByRole('button', { name: 'Confirmar correo' })
+		);
+		await vi.waitFor(() =>
+			expect(put).toHaveBeenCalledWith('/usuarios/9', { email_verificado: true })
+		);
+		await vi.waitFor(() =>
+			expect(
+				within(fila('Martina Gómez')).queryByText('Correo sin verificar')
+			).not.toBeInTheDocument()
+		);
+		expect(avisos()).toContain('Correo de Martina Gómez confirmado.');
+	});
+
+	it('cambia el rol con confirmación y muestra el motivo si el backend lo rechaza', async () => {
+		put.mockResolvedValue({ ...usuarios[2], rol: 'admin' });
+		await abrir('Usuarios');
+		await screen.findByText('Martina Gómez');
+		await userEvent.selectOptions(screen.getByLabelText('Rol de Martina Gómez'), 'admin');
+		const modal = await screen.findByRole('dialog');
+		expect(within(modal).getByText(/de Cliente a Dueño de comercio/)).toBeInTheDocument();
+		await userEvent.click(within(modal).getByRole('button', { name: 'Sí, cambiar' }));
+		await vi.waitFor(() => expect(put).toHaveBeenCalledWith('/usuarios/9', { rol: 'admin' }));
+		await vi.waitFor(() =>
+			expect(screen.getByLabelText('Rol de Martina Gómez')).toHaveValue('admin')
+		);
+
+		put.mockRejectedValue(new ApiError(409, 'Tiene 1 comercio(s) a su nombre'));
+		await userEvent.selectOptions(screen.getByLabelText('Rol de Sofía Ramírez'), 'cliente');
+		await userEvent.click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sí, cambiar' })
+		);
+		await vi.waitFor(() => expect(avisos()).toContain('Tiene 1 comercio(s) a su nombre'));
+		expect(screen.getByLabelText('Rol de Sofía Ramírez')).toHaveValue('admin');
+	});
+
+	it('marca los obligatorios y muestra las condiciones de la contraseña', async () => {
+		await abrir('Usuarios');
+		expect(screen.getByLabelText(/^Nombre ?[*]$/)).toBeInTheDocument();
+		expect(screen.getByLabelText(/^Contraseña ?[*]$/)).toBeInTheDocument();
+		await userEvent.type(screen.getByLabelText(/^Contraseña ?[*]$/), 'clave');
+		expect(screen.getByText('Una letra mayúscula')).toBeInTheDocument();
+		await userEvent.type(screen.getByLabelText(/^Nombre/), 'Lucas');
+		await userEvent.type(screen.getByLabelText(/^Email/), 'lucas@demo.com');
+		await userEvent.click(screen.getByRole('button', { name: 'Crear usuario' }));
+		expect(await screen.findByText(/al menos 8 caracteres e incluir/)).toBeInTheDocument();
+		expect(post).not.toHaveBeenCalled();
+	});
+
+	it('busca y pagina los usuarios', async () => {
+		await abrir('Usuarios');
+		await screen.findByText('Sofía Ramírez');
+		expect(get).toHaveBeenCalledWith('/usuarios?limit=21&offset=0');
+		await userEvent.type(screen.getByLabelText('Buscar usuario'), 'martina');
+		await userEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+		await vi.waitFor(() => expect(screen.queryByText('Sofía Ramírez')).not.toBeInTheDocument());
+		expect(get).toHaveBeenCalledWith('/usuarios?limit=21&offset=0&q=martina');
+		expect(screen.getByText('Martina Gómez')).toBeInTheDocument();
+		await userEvent.selectOptions(screen.getByLabelText('Filtrar por rol'), 'admin');
+		await vi.waitFor(() =>
+			expect(get).toHaveBeenCalledWith('/usuarios?limit=21&offset=0&q=martina&rol=admin')
+		);
+		expect(await screen.findByText('Ningún usuario coincide con la búsqueda.')).toBeInTheDocument();
 	});
 
 	it('valida los datos antes de crear', async () => {
 		await abrir('Usuarios');
 		await userEvent.click(screen.getByRole('button', { name: 'Crear usuario' }));
 		expect(await screen.findByText('Este campo es obligatorio')).toBeInTheDocument();
-		await userEvent.type(screen.getByLabelText('Nombre'), 'Lucas');
-		await userEvent.type(screen.getByLabelText('Email'), 'lucas-sin-arroba');
-		await userEvent.type(screen.getByLabelText('Contraseña'), 'Clave1234');
+		await userEvent.type(screen.getByLabelText(/^Nombre/), 'Lucas');
+		await userEvent.type(screen.getByLabelText(/^Email/), 'lucas-sin-arroba');
+		await userEvent.type(screen.getByLabelText(/^Contraseña/), 'Clave1234');
 		await userEvent.click(screen.getByRole('button', { name: 'Crear usuario' }));
 		expect(await screen.findByText('Ingresá un correo electrónico válido')).toBeInTheDocument();
 		expect(post).not.toHaveBeenCalled();
@@ -340,10 +533,10 @@ describe('solapa Usuarios', () => {
 	it('crea una cuenta con el rol elegido y recarga la lista', async () => {
 		await abrir('Usuarios');
 		await screen.findByText('Sofía Ramírez');
-		await userEvent.type(screen.getByLabelText('Nombre'), ' Lucas Díaz ');
-		await userEvent.type(screen.getByLabelText('Email'), 'lucas@demo.com');
-		await userEvent.type(screen.getByLabelText('Contraseña'), 'Clave1234');
-		await userEvent.selectOptions(screen.getByLabelText('Rol'), 'superadmin');
+		await userEvent.type(screen.getByLabelText(/^Nombre/), ' Lucas Díaz ');
+		await userEvent.type(screen.getByLabelText(/^Email/), 'lucas@demo.com');
+		await userEvent.type(screen.getByLabelText(/^Contraseña/), 'Clave1234');
+		await userEvent.selectOptions(screen.getByLabelText(/^Rol ?[*]$/), 'superadmin');
 		await userEvent.click(screen.getByRole('button', { name: 'Crear usuario' }));
 		await vi.waitFor(() =>
 			expect(post).toHaveBeenCalledWith('/usuarios', {
@@ -353,23 +546,23 @@ describe('solapa Usuarios', () => {
 				rol: 'superadmin'
 			})
 		);
-		await vi.waitFor(() => expect(llamadasA('/usuarios')).toBe(2));
-		expect(screen.getByLabelText('Nombre')).toHaveValue('');
+		await vi.waitFor(() => expect(llamadasA('/usuarios?limit=21&offset=0')).toBe(2));
+		expect(screen.getByLabelText(/^Nombre/)).toHaveValue('');
 	});
 
 	it('si el correo ya existe muestra el aviso del backend', async () => {
 		post.mockRejectedValue(new ApiError(409, 'El email ya está registrado'));
 		await abrir('Usuarios');
-		await userEvent.type(screen.getByLabelText('Nombre'), 'Sofía');
-		await userEvent.type(screen.getByLabelText('Email'), 'negocio@demo.com');
-		await userEvent.type(screen.getByLabelText('Contraseña'), 'Clave1234');
+		await userEvent.type(screen.getByLabelText(/^Nombre/), 'Sofía');
+		await userEvent.type(screen.getByLabelText(/^Email/), 'negocio@demo.com');
+		await userEvent.type(screen.getByLabelText(/^Contraseña/), 'Clave1234');
 		await userEvent.click(screen.getByRole('button', { name: 'Crear usuario' }));
 		expect(await screen.findByText('El email ya está registrado')).toBeInTheDocument();
 	});
 
 	it('si falla la carga muestra el motivo', async () => {
 		get.mockImplementation(async (url: string) => {
-			if (url === '/usuarios') throw new Error('red caída');
+			if (url.startsWith('/usuarios')) throw new Error('red caída');
 			return backend(url);
 		});
 		await abrir('Usuarios');
@@ -377,77 +570,106 @@ describe('solapa Usuarios', () => {
 	});
 });
 
+/** El comercio de la publicidad se elige buscándolo por nombre. */
+async function elegirComercio() {
+	await userEvent.type(screen.getByRole('combobox', { name: /^Comercio/ }), 'estilo');
+	await userEvent.click(await screen.findByRole('option', { name: /Estilo Urbano/ }));
+}
+
 describe('solapa Publicidades (RF-06)', () => {
-	it('distingue las de comercio de las colectas de la plataforma', async () => {
+	it('abre la bandeja de pendientes y muestra el comercio y el estado', async () => {
 		await abrir('Publicidades');
 		expect(await screen.findByText('20% en cortes')).toBeInTheDocument();
-		expect(screen.getByText(/#4 · comercio #7/)).toBeInTheDocument();
-		expect(screen.getByText(/#5 · colecta de la plataforma/)).toBeInTheDocument();
+		expect(get).toHaveBeenCalledWith('/publicidades?estado=pendiente');
+		expect(screen.getByText('Peluquería Central')).toBeInTheDocument();
+		expect(within(fila('20% en cortes')).getByText('Pendiente')).toBeInTheDocument();
+		expect(within(fila('Promo vieja')).getByText('Aprobada')).toBeInTheDocument();
 	});
 
-	it('exige título, descripción e imagen http(s) en ese orden', async () => {
+	it('aprobar y rechazar cambian el estado en el backend y la sacan de la bandeja', async () => {
+		put.mockImplementation(async (url: string, cuerpo: { estado: string }) => ({
+			...publicidades[0],
+			estado: cuerpo.estado,
+			url
+		}));
+		await abrir('Publicidades');
+		await screen.findByText('20% en cortes');
+		await userEvent.click(within(fila('20% en cortes')).getByRole('button', { name: 'Aprobar' }));
+		await vi.waitFor(() =>
+			expect(put).toHaveBeenCalledWith('/publicidades/4/estado', { estado: 'aprobada' })
+		);
+		await vi.waitFor(() => expect(screen.queryByText('20% en cortes')).not.toBeInTheDocument());
+		expect(avisos()).toContain('Publicidad aprobada.');
+		await userEvent.click(within(fila('Promo vieja')).getByRole('button', { name: 'Finalizar' }));
+		await vi.waitFor(() =>
+			expect(put).toHaveBeenCalledWith('/publicidades/6/estado', { estado: 'finalizada' })
+		);
+	});
+
+	it('exige comercio, título, descripción e imagen http(s) en ese orden', async () => {
 		await abrir('Publicidades');
 		const publicar = () => userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
 		await publicar();
+		expect(await screen.findByText(/Elegí el comercio/)).toBeInTheDocument();
+		await elegirComercio();
+		await publicar();
 		expect(await screen.findByText('El título es obligatorio.')).toBeInTheDocument();
-		await userEvent.type(screen.getByLabelText('Título'), 'Feria de emprendedores');
+		// Los obligatorios están marcados con *.
+		await userEvent.type(screen.getByLabelText(/^Título ?[*]$/), 'Feria de emprendedores');
 		await publicar();
 		expect(await screen.findByText('La descripción es obligatoria.')).toBeInTheDocument();
-		await userEvent.type(screen.getByLabelText('Descripción'), 'Sábado en la plaza');
-		await userEvent.type(screen.getByLabelText('URL de imagen'), 'ftp://x.com/a.png');
+		await userEvent.type(screen.getByLabelText(/^Descripción ?[*]$/), 'Sábado en la plaza');
+		await userEvent.type(screen.getByLabelText(/^URL de imagen ?[*]$/), 'ftp://x.com/a.png');
 		await publicar();
 		expect(await screen.findByText(/La imagen es obligatoria/)).toBeInTheDocument();
 		expect(post).not.toHaveBeenCalled();
 	});
 
-	it('sin comercio crea una colecta de la plataforma y recarga', async () => {
+	it('con ID de comercio la crea aprobada y recarga la lista', async () => {
+		post.mockResolvedValue({ id: 9, empresa_id: 7, estado: 'aprobada' });
 		await abrir('Publicidades');
 		await screen.findByText('20% en cortes');
-		await userEvent.type(screen.getByLabelText('Título'), 'Colecta de abrigo');
-		await userEvent.type(screen.getByLabelText('Descripción'), 'Hasta el viernes');
-		await userEvent.type(screen.getByLabelText('URL de imagen'), 'https://x.com/a.jpg');
+		await elegirComercio();
+		await userEvent.type(screen.getByLabelText(/^Título/), 'Promo');
+		await userEvent.type(screen.getByLabelText(/^Descripción/), 'Descuento');
+		await userEvent.type(screen.getByLabelText(/^URL de imagen/), 'http://x.com/p.png');
 		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
 		await vi.waitFor(() =>
 			expect(post).toHaveBeenCalledWith('/publicidades', {
-				empresa_id: null,
-				titulo: 'Colecta de abrigo',
-				descripcion: 'Hasta el viernes',
-				imagen_url: 'https://x.com/a.jpg'
+				empresa_id: 7,
+				titulo: 'Promo',
+				descripcion: 'Descuento',
+				url_imagen: 'http://x.com/p.png'
 			})
 		);
-		await vi.waitFor(() => expect(llamadasA('/publicidades')).toBe(2));
-		expect(screen.getByLabelText('Título')).toHaveValue('');
-	});
-
-	it('con ID de comercio la asocia a ese comercio', async () => {
-		await abrir('Publicidades');
-		await userEvent.type(screen.getByLabelText(/ID del comercio/), '7');
-		await userEvent.type(screen.getByLabelText('Título'), 'Promo');
-		await userEvent.type(screen.getByLabelText('Descripción'), 'Descuento');
-		await userEvent.type(screen.getByLabelText('URL de imagen'), 'http://x.com/p.png');
-		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
-		await vi.waitFor(() =>
-			expect(post).toHaveBeenCalledWith('/publicidades', expect.objectContaining({ empresa_id: 7 }))
-		);
+		await vi.waitFor(() => expect(llamadasA('/publicidades?estado=pendiente')).toBe(2));
+		expect(avisos()).toContain('Publicidad creada y aprobada.');
+		expect(screen.getByLabelText(/^Título/)).toHaveValue('');
 	});
 
 	it('si el backend la rechaza muestra el motivo', async () => {
-		post.mockRejectedValue(new ApiError(403, 'Solo el superadmin crea colectas'));
+		post.mockRejectedValue(new ApiError(400, 'El rubro indicado no existe'));
 		await abrir('Publicidades');
-		await userEvent.type(screen.getByLabelText('Título'), 'Colecta');
-		await userEvent.type(screen.getByLabelText('Descripción'), 'Ayuda');
-		await userEvent.type(screen.getByLabelText('URL de imagen'), 'https://x.com/a.jpg');
+		await elegirComercio();
+		await userEvent.type(screen.getByLabelText(/^Título/), 'Promo');
+		await userEvent.type(screen.getByLabelText(/^Descripción/), 'Ayuda');
+		await userEvent.type(screen.getByLabelText(/^URL de imagen/), 'https://x.com/a.jpg');
 		await userEvent.click(screen.getByRole('button', { name: 'Publicar' }));
-		expect(await screen.findByText('Solo el superadmin crea colectas')).toBeInTheDocument();
+		expect(await screen.findByText('El rubro indicado no existe')).toBeInTheDocument();
 	});
 
-	it('filtra por comercio', async () => {
+	it('filtra por estado y por comercio', async () => {
 		await abrir('Publicidades');
 		await screen.findByText('20% en cortes');
-		await userEvent.type(screen.getByLabelText('Filtrar por comercio'), '7');
+		await userEvent.selectOptions(screen.getByLabelText('Estado'), 'todas');
+		await vi.waitFor(() => expect(get).toHaveBeenCalledWith('/publicidades?estado=todas'));
+		// Por nombre del comercio, no por id.
+		await userEvent.type(screen.getByLabelText('Filtrar por comercio'), 'gym norte');
 		await userEvent.click(screen.getByRole('button', { name: 'Filtrar' }));
-		await vi.waitFor(() => expect(get).toHaveBeenCalledWith('/publicidades?empresa_id=7'));
-		expect(llamadasA('/publicidades?empresa_id=7')).toBe(1);
+		await vi.waitFor(() =>
+			expect(get).toHaveBeenCalledWith('/publicidades?estado=todas&q=gym%20norte')
+		);
+		expect(llamadasA('/publicidades?estado=todas&q=gym%20norte')).toBe(1);
 	});
 
 	describe('baja', () => {

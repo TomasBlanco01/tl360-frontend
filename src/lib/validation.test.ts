@@ -9,10 +9,8 @@ import {
 	esPasswordSegura,
 	esTurnoPasado,
 	formatearFechaAR,
-	minLength,
 	numericPositive,
 	passwordSegura,
-	phone,
 	required,
 	telefonoSoloDigitos,
 	validate,
@@ -32,23 +30,31 @@ describe('required', () => {
 });
 
 describe('email', () => {
-	it.each(['ana@test.com', 'a.b@dominio.com.ar', 'x+tag@y.io'])('acepta %s', (v) => {
-		expect(email()(v)).toBeNull();
-	});
-	it.each(['sin-arroba', 'a@b', '@x.com', 'a b@x.com', 'a@@x.com'])('rechaza %s', (v) => {
+	it.each(['ana@test.com', 'a.b@dominio.com.ar', 'x+tag@y.io', "o'brien@mail.ie", 'a@sub-ok.com'])(
+		'acepta %s',
+		(v) => {
+			expect(email()(v)).toBeNull();
+		}
+	);
+	it.each([
+		'sin-arroba',
+		'a@b',
+		'@x.com',
+		'a b@x.com',
+		'a@@x.com',
+		'a..b@x.com',
+		'.a@x.com',
+		'a.@x.com',
+		'a,b@x.com',
+		'a@x..com',
+		'a@-x.com',
+		'a@x.c',
+		'a@x.c0m'
+	])('rechaza %s (misma regla que el backend)', (v) => {
 		expect(email()(v)).toBe('Ingresá un correo electrónico válido');
 	});
 	it('un valor vacío no es error (lo decide required)', () => {
 		expect(email()('')).toBeNull();
-	});
-});
-
-describe('phone', () => {
-	it.each(['2392411234', '(2392) 41-1234', '+54 9 2392 411234'])('acepta %s', (v) => {
-		expect(phone()(v)).toBeNull();
-	});
-	it.each(['123', 'abc123456', '1'.repeat(21)])('rechaza %s', (v) => {
-		expect(phone()(v)).toBe('Ingresá un teléfono válido');
 	});
 });
 
@@ -87,17 +93,6 @@ describe('CUIT argentino (RF-15, módulo 11)', () => {
 	it.each(['20123456789', '12345678901', '123', 'abcdefghijk'])('rechaza %s', (v) => {
 		expect(esCuitValido(v)).toBe(false);
 		expect(cuit()(v)).toBe('Ingresá un CUIT válido de 11 dígitos');
-	});
-});
-
-describe('minLength', () => {
-	it('exige el mínimo sobre el texto sin espacios de los bordes', () => {
-		expect(minLength(6)('12345')).toBe('Debe tener al menos 6 caracteres');
-		expect(minLength(6)('123456')).toBeNull();
-		expect(minLength(6)('  12345  ')).toBe('Debe tener al menos 6 caracteres');
-	});
-	it('vacío no es error', () => {
-		expect(minLength(6)('')).toBeNull();
 	});
 });
 
@@ -149,13 +144,13 @@ describe('valores numéricos (inputs type="number")', () => {
 	});
 	it('validateForm acepta números en los valores', () => {
 		const errores = validateForm(
-			{ duracion: 45, categoria: null } as unknown as Record<string, string>,
+			{ duracion: 45, rubro: null } as unknown as Record<string, string>,
 			{
 				duracion: [required(), numericPositive()],
-				categoria: [required()]
+				rubro: [required()]
 			}
 		);
-		expect(errores).toEqual({ categoria: 'Este campo es obligatorio' });
+		expect(errores).toEqual({ rubro: 'Este campo es obligatorio' });
 	});
 });
 
@@ -163,7 +158,7 @@ describe('validateForm', () => {
 	const reglas = {
 		nombre: [required()],
 		email: [required(), email()],
-		contraseña: [required(), minLength(6)]
+		contraseña: [required(), passwordSegura()]
 	};
 
 	it('devuelve un error por campo inválido', () => {
@@ -171,9 +166,9 @@ describe('validateForm', () => {
 		expect(Object.keys(errores).sort()).toEqual(['contraseña', 'email', 'nombre']);
 	});
 	it('no devuelve nada si todo es válido', () => {
-		expect(validateForm({ nombre: 'Ana', email: 'a@b.com', contraseña: '123456' }, reglas)).toEqual(
-			{}
-		);
+		expect(
+			validateForm({ nombre: 'Ana', email: 'a@b.com', contraseña: 'Clave1234' }, reglas)
+		).toEqual({});
 	});
 	it('ignora campos sin reglas y tolera los que faltan', () => {
 		expect(validateForm({ extra: 'x' } as Record<string, string>, { extra: [] })).toEqual({});

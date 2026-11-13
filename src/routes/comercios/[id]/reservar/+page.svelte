@@ -7,10 +7,12 @@
 	import { urlEmpresa } from '$lib/slug';
 	import { exigirAcceso } from '$lib/auth/guard';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { toast } from '$lib/_auditoria/toast.svelte';
+	import { toast } from '$lib/components/toast.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import AgregarAlCalendario from '$lib/components/AgregarAlCalendario.svelte';
+	import type { EventoTurno } from '$lib/utils/ics';
 
 	// 1.1 Acepta id numérico o slug.
 	const slugOId = $derived(page.params.id);
@@ -23,6 +25,7 @@
 	let paso = $state<'fecha' | 'confirmar' | 'exito'>('fecha');
 	let error = $state('');
 	let reservando = $state(false);
+	let evento = $state<EventoTurno | null>(null);
 	// RF-01: el backend exige correo verificado (403). Se muestra el atajo en vez del formulario.
 	let sinVerificar = $state(false);
 
@@ -76,11 +79,19 @@
 		error = '';
 		reservando = true;
 		try {
-			await api.post('/turnos/reservar', {
+			const res = await api.post<{ id?: number }>('/turnos/reservar', {
 				empresa_id: empresa.id,
 				fecha,
 				hora: horaSeleccionada
 			});
+			evento = {
+				id: res?.id ?? `${empresa.id}-${fecha}-${horaSeleccionada}`,
+				titulo: `Turno en ${empresa.nombre}`,
+				fecha,
+				hora: horaSeleccionada,
+				duracionMin: empresa.duracion_turno_min || 30,
+				lugar: empresa.direccion
+			};
 			paso = 'exito';
 			toast.exito('Turno reservado correctamente.');
 		} catch (err) {
@@ -115,11 +126,32 @@
 			title="¡Turno reservado!"
 			description="Te esperamos en la fecha y horario elegidos."
 		>
+			{#if evento}
+				<p class="mb-2 text-sm text-gray-600 dark:text-gray-400">Agregalo a tu calendario:</p>
+				<AgregarAlCalendario {evento} class="mb-5" />
+			{/if}
 			<div class="flex gap-3">
 				<Button href="/cuenta" size="lg">Ver mis turnos</Button>
 				<Button href="/comercios" variant="outline" size="lg">Seguir explorando</Button>
 			</div>
 		</EmptyState>
+	{:else if auth.user && auth.user.rol !== 'cliente'}
+		<!-- Igual que el backend: reservar online es de clientes. -->
+		<Card class="p-6">
+			<p class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+				Las reservas online se hacen con una cuenta de cliente
+			</p>
+			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+				{auth.isAdmin
+					? 'Los turnos de tu comercio se agendan desde Mi Negocio.'
+					: 'La cuenta de administración de la plataforma no reserva turnos.'}
+			</p>
+			<div class="mt-4">
+				<Button href={auth.isAdmin ? '/negocio' : '/admin'} size="lg">
+					{auth.isAdmin ? 'Ir a Mi Negocio' : 'Ir al panel'}
+				</Button>
+			</div>
+		</Card>
 	{:else if cuentaSinVerificar || sinVerificar}
 		<Card class="p-6">
 			<p class="text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -137,7 +169,7 @@
 	{:else}
 		<Card class="p-6">
 			<label class="mb-4 block text-sm font-medium text-gray-700 dark:text-gray-200">
-				Elegí una fecha
+				Elegí una fecha <span class="text-danger-600">*</span>
 				<input
 					type="date"
 					bind:value={fecha}

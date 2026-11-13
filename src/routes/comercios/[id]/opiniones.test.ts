@@ -59,7 +59,7 @@ function backend(
 				id: 7,
 				nombre: 'Estilo Urbano',
 				turnos_habilitados: true,
-				admin_id: 50,
+				usuario_id: 50,
 				...comercio
 			});
 		if (url === '/empresas/horarios/7') return {};
@@ -205,11 +205,20 @@ describe('opiniones', () => {
 	});
 
 	it('muestra el mensaje del backend si rechaza la calificación', async () => {
-		post.mockRejectedValue(new ApiError(403, 'No podés calificar tu propio comercio'));
+		post.mockRejectedValue(
+			new ApiError(
+				403,
+				'No tenés los permisos para realizar esta acción: no podés calificar tu propio comercio'
+			)
+		);
 		await cargarConFormulario();
 		await userEvent.click(screen.getByRole('radio', { name: '5 estrellas' }));
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar calificación' }));
-		expect(await screen.findByText('No podés calificar tu propio comercio')).toBeInTheDocument();
+		expect(
+			await screen.findByText(
+				'No tenés los permisos para realizar esta acción: no podés calificar tu propio comercio'
+			)
+		).toBeInTheDocument();
 	});
 });
 
@@ -226,7 +235,9 @@ describe('reportar un comercio', () => {
 		await userEvent.type(screen.getByLabelText('Motivo del reporte'), 'Los datos son falsos');
 		await userEvent.click(screen.getByRole('button', { name: 'Enviar reporte' }));
 		await waitFor(() =>
-			expect(post).toHaveBeenCalledWith('/empresas/7/reportes', { motivo: 'Los datos son falsos' })
+			expect(post).toHaveBeenCalledWith('/empresas/7/reportes', {
+				descripcion: 'Los datos son falsos'
+			})
 		);
 		expect(await screen.findByText('Reporte enviado. Gracias por avisarnos.')).toBeInTheDocument();
 		expect(screen.queryByLabelText('Motivo del reporte')).not.toBeInTheDocument();
@@ -260,36 +271,45 @@ describe('reportar un comercio', () => {
 });
 
 describe('sello de verificado (superadmin)', () => {
-	it('un cliente no ve el botón', async () => {
+	it('un cliente no ve acciones de verificación', async () => {
 		await cargar();
 		expect(screen.queryByRole('button', { name: /sello de verificado/ })).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: /verificación/i })).not.toBeInTheDocument();
 	});
 
-	it('el superadmin lo otorga y luego lo quita', async () => {
+	it('al superadmin de un comercio sin sello lo envía a Admin para aprobar', async () => {
 		auth.login('t', { ...USUARIO, id: 99, rol: 'superadmin' });
-		put.mockResolvedValueOnce({ verificado: true }).mockResolvedValueOnce({ verificado: false });
 		await cargar();
-		await userEvent.click(screen.getByRole('button', { name: 'Otorgar sello de verificado' }));
-		await waitFor(() =>
-			expect(put).toHaveBeenCalledWith('/empresas/7/verificado', { verificado: true })
+		expect(screen.getByRole('link', { name: 'Revisar verificación en Admin' })).toHaveAttribute(
+			'href',
+			'/admin'
 		);
+		expect(
+			screen.queryByRole('button', { name: 'Otorgar sello de verificado' })
+		).not.toBeInTheDocument();
+	});
+
+	it('el superadmin quita el sello de un comercio verificado', async () => {
+		auth.login('t', { ...USUARIO, id: 99, rol: 'superadmin' });
+		backend({ verificado: true, verificado_estado: 'verificado' });
+		put.mockResolvedValueOnce({ verificado: false, verificado_estado: 'sin_solicitar' });
+		await cargar();
 		expect(await screen.findByText('Verificado')).toBeInTheDocument();
 
 		await userEvent.click(screen.getByRole('button', { name: 'Quitar sello de verificado' }));
 		await waitFor(() =>
-			expect(put).toHaveBeenLastCalledWith('/empresas/7/verificado', { verificado: false })
+			expect(put).toHaveBeenCalledWith('/empresas/7/verificado', { verificado: false })
 		);
 		await waitFor(() => expect(screen.queryByText('Verificado')).not.toBeInTheDocument());
 	});
 
-	it('muestra el error si falla', async () => {
+	it('muestra el error si falla quitar el sello', async () => {
 		auth.login('t', { ...USUARIO, id: 99, rol: 'superadmin' });
-		put.mockRejectedValue(
-			new ApiError(403, 'Solo el administrador de la plataforma puede hacer esto')
-		);
+		backend({ verificado: true, verificado_estado: 'verificado' });
+		put.mockRejectedValue(new ApiError(403, 'No tenés los permisos para realizar esta acción'));
 		await cargar();
-		await userEvent.click(screen.getByRole('button', { name: 'Otorgar sello de verificado' }));
-		expect(await screen.findByText(/Solo el administrador/)).toBeInTheDocument();
+		await userEvent.click(screen.getByRole('button', { name: 'Quitar sello de verificado' }));
+		expect(await screen.findByText(/No tenés los permisos/)).toBeInTheDocument();
 	});
 });
 

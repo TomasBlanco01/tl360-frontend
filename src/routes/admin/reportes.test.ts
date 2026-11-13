@@ -19,7 +19,7 @@ const REPORTES = [
 		empresa_id: 7,
 		empresa_nombre: 'Estilo Urbano',
 		usuario_nombre: 'Martina',
-		motivo: 'Datos falsos',
+		descripcion: 'Datos falsos',
 		resuelto: false,
 		creado_en: '2026-09-20T10:00:00Z'
 	},
@@ -28,7 +28,7 @@ const REPORTES = [
 		empresa_id: 8,
 		empresa_nombre: 'Gym Norte',
 		usuario_nombre: null,
-		motivo: 'Cerró hace meses',
+		descripcion: 'Cerró hace meses',
 		resuelto: false,
 		creado_en: '2026-09-21T10:00:00Z'
 	}

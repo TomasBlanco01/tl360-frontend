@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
-	import type { Categoria, Empresa } from '$lib/types';
+	import type { Rubro, Empresa } from '$lib/types';
 	import { publicidades } from '$lib/stores/publicidades.svelte';
 	import EmpresaCard from '$lib/components/EmpresaCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import PublicidadCarousel from '$lib/components/PublicidadCarousel.svelte';
+	import { normalizar } from '$lib/busqueda';
 
 	import Scissors from '@lucide/svelte/icons/scissors';
 	import Dumbbell from '@lucide/svelte/icons/dumbbell';
@@ -66,9 +67,11 @@
 		Veterinaria: PawPrint
 	};
 
-	let categorias = $state<Categoria[]>([]);
+	let categorias = $state<Rubro[]>([]);
 	let empresas = $state<Empresa[]>([]);
 	let query = $state('');
+	// Buscador interno de rubros: hay cientos, así que se filtran mientras se escribe.
+	let filtroRubro = $state('');
 
 	const MAX_VISIBLES = 14;
 	let abiertos = $state(new Set<string>());
@@ -80,28 +83,41 @@
 		abiertos = s;
 	}
 
-	// Rubros agrupados por súper rubro; sin backend real (mock) todo cae en un único grupo.
+	const GRUPOS = {
+		turnos: {
+			nombre: 'Con reserva de turnos online',
+			descripcion: 'Rubros donde podés sacar turno desde TL360.'
+		},
+		directorio: {
+			nombre: 'Solo directorio',
+			descripcion: 'Comercios con sus datos de contacto para llamar o escribir.'
+		}
+	} as const;
+
+	// Rubros agrupados según si sus comercios toman turnos online o solo figuran en el directorio,
+	// en orden alfabético y filtrados por el buscador interno.
 	const grupos = $derived.by(() => {
-		const porGrupo = new Map<string, Categoria[]>();
+		const q = normalizar(filtroRubro);
+		const porGrupo = new Map<keyof typeof GRUPOS, Rubro[]>();
 		for (const c of categorias) {
 			if (c.cantidad === 0) continue;
-			const nombre = c.super_rubro ?? 'Rubros';
-			porGrupo.set(nombre, [...(porGrupo.get(nombre) ?? []), c]);
+			if (q && !normalizar(c.nombre).includes(q)) continue;
+			const clave = c.turnos_habilitados === false ? 'directorio' : 'turnos';
+			porGrupo.set(clave, [...(porGrupo.get(clave) ?? []), c]);
 		}
-		return [...porGrupo]
-			.map(([nombre, cats]) => ({
-				nombre,
-				categorias: cats.sort(
-					(x, y) => (y.cantidad ?? 0) - (x.cantidad ?? 0) || x.nombre.localeCompare(y.nombre)
-				),
-				total: cats.reduce((s, c) => s + (c.cantidad ?? 0), 0)
-			}))
-			.sort((x, y) => y.total - x.total);
+		return (['turnos', 'directorio'] as const)
+			.filter((clave) => porGrupo.has(clave))
+			.map((clave) => ({
+				...GRUPOS[clave],
+				categorias: porGrupo
+					.get(clave)!
+					.sort((x, y) => x.nombre.localeCompare(y.nombre, 'es', { sensitivity: 'base' }))
+			}));
 	});
 
 	$effect(() => {
 		api
-			.get<Categoria[]>('/categorias')
+			.get<Rubro[]>('/rubros')
 			.then((res) => (categorias = res))
 			.catch((err) => console.error('Error al obtener categorías:', err));
 
@@ -116,7 +132,7 @@
 		goto(`/comercios${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''}`);
 	}
 
-	function goToCategoria(categoria: Categoria) {
+	function goToCategoria(categoria: Rubro) {
 		goto(`/comercios?categoria=${categoria.id}`);
 	}
 </script>
@@ -145,39 +161,51 @@
 </section>
 
 <!-- Publicidades destacadas -->
-{#if publicidades.items.length > 0}
+{#if publicidades.carrusel.length > 0}
 	<section class="mx-auto max-w-6xl px-4 pt-10">
-		<div class="mb-5 flex flex-wrap items-center justify-between gap-2">
-			<h2 class="text-xl font-bold text-gray-800 dark:text-gray-100">Destacados</h2>
-			<a
-				href="/publicitar"
-				class="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400"
-				>Difundí tu evento o colecta →</a
-			>
-		</div>
-		<PublicidadCarousel items={publicidades.items} />
+		<!-- Publicidades de comercios + eventos y colectas aprobados. Para pedir una difusión: navbar. -->
+		<h2 class="mb-5 text-xl font-bold text-gray-800 dark:text-gray-100">
+			Destacados, eventos y colectas
+		</h2>
+		<PublicidadCarousel items={publicidades.carrusel} />
 	</section>
 {/if}
 
 <!-- Categorías -->
 <section class="mx-auto max-w-6xl px-4 py-10">
-	<h2 class="mb-5 text-xl font-bold text-gray-800 dark:text-gray-100">Explorá por rubro</h2>
+	<div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+		<h2 class="text-xl font-bold text-gray-800 dark:text-gray-100">Explorá por rubro</h2>
+		<input
+			type="search"
+			bind:value={filtroRubro}
+			placeholder="Buscar un rubro… (ej. pelu, gim)"
+			aria-label="Buscar un rubro"
+			class="w-full rounded-full border border-gray-200 bg-white px-4 py-2 text-sm text-gray-800 shadow-[var(--shadow-card)] outline-none focus:ring-2 focus:ring-brand-300 sm:w-72 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+		/>
+	</div>
 	{#if categorias.length === 0}
 		<p class="text-sm text-gray-400 dark:text-gray-500">Cargando categorías...</p>
+	{:else if grupos.length === 0}
+		<p class="text-sm text-gray-500 dark:text-gray-400">
+			No encontramos rubros que coincidan con “{filtroRubro}”.
+			<a
+				href="/comercios?q={encodeURIComponent(filtroRubro.trim())}"
+				class="font-semibold text-brand-600 hover:underline dark:text-brand-400"
+				>Buscarlo entre los comercios →</a
+			>
+		</p>
 	{:else}
 		<div class="grid grid-cols-1 gap-6 md:grid-cols-2">
 			{#each grupos as grupo (grupo.nombre)}
 				<div class="rounded-card bg-white p-5 shadow-[var(--shadow-card)] dark:bg-gray-900">
-					<p
-						class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400"
-					>
+					<p class="text-sm font-semibold tracking-wide text-gray-600 uppercase dark:text-gray-300">
 						{grupo.nombre}
-						<span class="font-normal text-gray-400 dark:text-gray-500"
-							>· {grupo.total} comercios</span
-						>
+					</p>
+					<p class="mb-3 text-xs text-gray-400 dark:text-gray-500">
+						{grupo.descripcion} Tocá un rubro para ver sus comercios; el número es cuántos hay.
 					</p>
 					<div class="flex flex-wrap gap-2">
-						{#each abiertos.has(grupo.nombre) ? grupo.categorias : grupo.categorias.slice(0, MAX_VISIBLES) as categoria (categoria.id)}
+						{#each abiertos.has(grupo.nombre) || filtroRubro ? grupo.categorias : grupo.categorias.slice(0, MAX_VISIBLES) as categoria (categoria.id)}
 							{@const Icon = iconMap[categoria.nombre]}
 							<button
 								class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1.5 text-sm text-gray-700 transition hover:border-brand-300 hover:bg-brand-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -188,8 +216,9 @@
 										strokeWidth={1.5}
 									/>{/if}
 								{categoria.nombre}
-								{#if categoria.cantidad}<span class="text-xs text-gray-400 dark:text-gray-500"
-										>{categoria.cantidad}</span
+								{#if categoria.cantidad}<span
+										class="rounded-full bg-gray-100 px-1.5 text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+										title="{categoria.cantidad} comercios">{categoria.cantidad}</span
 									>{/if}
 								{#if categoria.turnos_habilitados}<span
 										title="Con reserva de turnos"
@@ -198,7 +227,7 @@
 							</button>
 						{/each}
 					</div>
-					{#if grupo.categorias.length > MAX_VISIBLES}
+					{#if grupo.categorias.length > MAX_VISIBLES && !filtroRubro}
 						<button
 							class="mt-3 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
 							onclick={() => toggleGrupo(grupo.nombre)}

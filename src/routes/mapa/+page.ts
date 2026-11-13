@@ -11,8 +11,8 @@ export const load: PageLoad = ({ url }) => {
 	params.set('vista', 'mapa');
 	const q = url.searchParams.get('q');
 	if (q) params.set('q', q);
-	// El directorio usa `?categoria=`; esta ruta vieja usaba `?categoria_id=`.
-	const categoria = url.searchParams.get('categoria') ?? url.searchParams.get('categoria_id');
+	// El directorio usa `?categoria=`; esta ruta vieja usaba `?rubro_id=`.
+	const categoria = url.searchParams.get('categoria') ?? url.searchParams.get('rubro_id');
 	if (categoria) params.set('categoria', categoria);
 	const etiquetas = url.searchParams.get('etiquetas');
 	if (etiquetas) params.set('etiquetas', etiquetas);

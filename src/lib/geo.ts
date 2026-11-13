@@ -21,19 +21,36 @@ export interface GrupoMapa<T extends { lat: number; lng: number }> {
 	items: T[];
 }
 
+/** Escapa texto para interpolar seguro dentro de un popup Leaflet (HTML string). */
+export function escaparHtml(texto: string): string {
+	return texto
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
 /**
- * Clustering liviano sin dependencias: agrupa puntos cercanos en una grilla
- * cuya celda depende del zoom. zoom>=15 → ~100m, >=13 → ~500m, si no → ~1km.
- * Evita cientos de circleMarkers superpuestos en el directorio.
+ * Clustering por pantalla: agrupa los puntos que caen a menos de `celdaPx` píxeles entre sí con el
+ * zoom actual (la proyección la da Leaflet). Se recalcula en cada zoom: alejado agrupa, y al
+ * acercarse los grupos se abren hasta mostrar cada comercio en su ubicación real.
+ * Con `celdaPx <= 0` (zoom máximo) no agrupa.
  */
-export function agruparPuntos<T extends { lat: number; lng: number }>(
+export function agruparEnPantalla<T extends { lat: number; lng: number }>(
 	puntos: T[],
-	zoom = 14
+	proyectar: (lat: number, lng: number) => { x: number; y: number },
+	celdaPx = 56
 ): GrupoMapa<T>[] {
-	const paso = zoom >= 15 ? 0.001 : zoom >= 13 ? 0.005 : 0.01;
 	const celdas = new Map<string, T[]>();
 	for (const p of puntos) {
-		const key = `${Math.round(p.lat / paso)}:${Math.round(p.lng / paso)}`;
+		const { x, y } = proyectar(p.lat, p.lng);
+		// Sin agrupar (celda 0) igual se juntan los que caen en el mismo píxel: comparten
+		// dirección y el mapa los abre en abanico para poder tocar cada uno.
+		const key =
+			celdaPx <= 0
+				? `${Math.round(x)}:${Math.round(y)}`
+				: `${Math.floor(x / celdaPx)}:${Math.floor(y / celdaPx)}`;
 		const g = celdas.get(key);
 		if (g) g.push(p);
 		else celdas.set(key, [p]);
@@ -45,12 +62,9 @@ export function agruparPuntos<T extends { lat: number; lng: number }>(
 	}));
 }
 
-/** Escapa texto para interpolar seguro dentro de un popup Leaflet (HTML string). */
-export function escaparHtml(texto: string): string {
-	return texto
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
+/** Límites visibles del mapa: [sur, oeste, norte, este]. */
+export type Limites = [number, number, number, number];
+
+export function dentroDeLimites(p: { lat: number; lng: number }, [s, o, n, e]: Limites): boolean {
+	return p.lat >= s && p.lat <= n && p.lng >= o && p.lng <= e;
 }

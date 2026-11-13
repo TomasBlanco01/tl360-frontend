@@ -3,10 +3,11 @@
 	import { goto } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import { api } from '$lib/api';
-	import type { Categoria, Empresa, PuntoMapa } from '$lib/types';
+	import type { Rubro, Empresa, PuntoMapa } from '$lib/types';
 	import { CATALOGO_ETIQUETAS, parsearEtiquetasParam } from '$lib/etiquetas';
 	import EmpresaCard from '$lib/components/EmpresaCard.svelte';
 	import MapaComercios from '$lib/components/MapaComercios.svelte';
+	import SelectorRubro from '$lib/components/SelectorRubro.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
@@ -15,7 +16,7 @@
 
 	type Ubicacion = { lat: number; lng: number };
 
-	let categorias = $state<Categoria[]>([]);
+	let categorias = $state<Rubro[]>([]);
 	let empresas = $state<Empresa[]>([]);
 	let hayMas = $state(false);
 	let cargando = $state(true);
@@ -51,7 +52,7 @@
 
 	$effect(() => {
 		api
-			.get<Categoria[]>('/categorias')
+			.get<Rubro[]>('/rubros')
 			.then((res) => (categorias = res))
 			.catch((err) => console.error(err));
 	});
@@ -68,7 +69,7 @@
 		if (reiniciar) error = '';
 		const params = new URLSearchParams();
 		if (q.trim()) params.set('q', q.trim());
-		if (cat) params.set('categoria_id', cat);
+		if (cat) params.set('rubro_id', cat);
 		if (tags.length > 0) params.set('etiquetas', tags.join(','));
 		if (geo) {
 			params.set('lat', String(geo.lat));
@@ -147,18 +148,80 @@
 		aplicarFiltros();
 	}
 
-	const puntos = $derived<PuntoMapa[]>(
-		empresas
-			.filter((e) => e.lat != null && e.lng != null)
-			.map((e) => ({
-				id: e.id,
-				nombre: e.nombre,
-				lat: e.lat!,
-				lng: e.lng!,
-				slug: e.slug,
-				verificado: e.verificado || e.verificado_estado === 'verificado'
-			}))
-	);
+	// ---------- Vista mapa ----------
+	// El mapa muestra TODOS los comercios que cumplen los filtros (no solo la página cargada) y el
+	// listado de abajo sigue a los que quedan a la vista: al acercarse o moverse, se actualiza.
+	let puntos = $state<PuntoMapa[]>([]);
+	let cargandoPuntos = $state(false);
+	let pedidoPuntos = 0;
+	let visibles = $state<number[]>([]);
+	let fichasMapa = $state<Empresa[]>([]);
+	let cargandoFichas = $state(false);
+	let pedidoFichas = 0;
+
+	async function cargarPuntos(q: string, cat: string, tags: string[]) {
+		const miPedido = ++pedidoPuntos;
+		cargandoPuntos = true;
+		const params = new URLSearchParams();
+		if (q.trim()) params.set('q', q.trim());
+		if (cat) params.set('rubro_id', cat);
+		if (tags.length > 0) params.set('etiquetas', tags.join(','));
+		try {
+			const res = await api.get<PuntoMapa[]>(
+				`/empresas/mapa${params.toString() ? `?${params}` : ''}`
+			);
+			if (miPedido !== pedidoPuntos) return;
+			puntos = res;
+		} catch (err) {
+			console.error(err);
+			if (miPedido === pedidoPuntos) error = 'No pudimos cargar el mapa. Revisá tu conexión.';
+		} finally {
+			if (miPedido === pedidoPuntos) cargandoPuntos = false;
+		}
+	}
+
+	$effect(() => {
+		if (vista !== 'mapa') return;
+		const q = query;
+		const cat = categoriaId;
+		const tags = etiquetas;
+		const t = setTimeout(() => untrack(() => cargarPuntos(q, cat, [...tags])), 300);
+		return () => clearTimeout(t);
+	});
+
+	/** Las fichas de los comercios a la vista, de a una página. */
+	async function cargarFichasVisibles(reiniciar: boolean) {
+		const desde = reiniciar ? 0 : fichasMapa.length;
+		const ids = visibles.slice(desde, desde + POR_PAGINA);
+		const miPedido = ++pedidoFichas;
+		if (ids.length === 0) {
+			if (reiniciar) fichasMapa = [];
+			return;
+		}
+		cargandoFichas = true;
+		try {
+			const res = await api.get<Empresa[]>(`/empresas?ids=${ids.join(',')}`);
+			if (miPedido !== pedidoFichas) return;
+			fichasMapa = reiniciar ? res : [...fichasMapa, ...res];
+		} catch (err) {
+			console.error(err);
+		} finally {
+			if (miPedido === pedidoFichas) cargandoFichas = false;
+		}
+	}
+
+	// Al moverse el mapa, espera a que se quede quieto antes de pedir las fichas.
+	$effect(() => {
+		if (vista !== 'mapa') return;
+		void visibles;
+		const t = setTimeout(() => untrack(() => cargarFichasVisibles(true)), 250);
+		return () => clearTimeout(t);
+	});
+
+	function alCambiarVisibles(ids: number[]) {
+		if (ids.length === visibles.length && ids.every((id, i) => id === visibles[i])) return;
+		visibles = ids;
+	}
 </script>
 
 <svelte:head>
@@ -213,17 +276,19 @@
 			aria-label="Buscar comercios"
 			class="min-w-0 flex-1 rounded-full border border-gray-200 bg-white px-5 py-2.5 text-gray-800 shadow-[var(--shadow-card)] outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
 		/>
-		<select
-			bind:value={categoriaId}
-			onchange={aplicarFiltros}
-			aria-label="Filtrar por rubro"
-			class="rounded-full border border-gray-200 bg-white px-4 py-2.5 text-gray-800 shadow-[var(--shadow-card)] outline-none focus:ring-2 focus:ring-brand-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-		>
-			<option value="">Todos los rubros</option>
-			{#each categorias.filter((c) => c.cantidad !== 0) as categoria (categoria.id)}
-				<option value={String(categoria.id)}>{categoria.nombre}</option>
-			{/each}
-		</select>
+		<div class="sm:w-72">
+			<SelectorRubro
+				id="filtro-rubro"
+				label="Filtrar por rubro"
+				variante="pildora"
+				opcionVacia="Todos los rubros"
+				ocultarVacios
+				mostrarCantidad
+				rubros={categorias}
+				bind:value={categoriaId}
+				onchange={aplicarFiltros}
+			/>
+		</div>
 	</div>
 
 	<div class="mb-4 flex flex-wrap items-center gap-3">
@@ -285,9 +350,9 @@
 	</div>
 
 	{#if vista === 'mapa'}
-		{#if error && empresas.length === 0}
+		{#if error && puntos.length === 0}
 			<EmptyState title="No pudimos cargar el mapa" description={error}>
-				<Button onclick={() => cargar(query, categoriaId, etiquetas, true)}>Reintentar</Button>
+				<Button onclick={() => cargarPuntos(query, categoriaId, etiquetas)}>Reintentar</Button>
 			</EmptyState>
 		{:else}
 			<div class="overflow-hidden rounded-card shadow-[var(--shadow-card)]">
@@ -295,24 +360,46 @@
 					{puntos}
 					yo={ubicacion ? [ubicacion.lat, ubicacion.lng] : null}
 					alto="h-[60vh]"
-					cargandoDatos={cargando}
-					onseleccionar={(id) => {
-						const e = empresas.find((x) => x.id === id);
-						goto(e?.slug ? `/comercios/${e.slug}` : `/comercios/${id}`);
-					}}
+					cargandoDatos={cargandoPuntos}
+					onvisibles={alCambiarVisibles}
 				/>
 			</div>
 		{/if}
-		<p class="mt-3 text-sm text-gray-400 dark:text-gray-500">
-			{puntos.length}
-			{puntos.length === 1 ? 'comercio' : 'comercios'} en el mapa con los filtros actuales.
+		<p class="mt-3 text-sm text-gray-500 dark:text-gray-400" aria-live="polite">
+			{#if cargandoPuntos && puntos.length === 0}
+				Cargando comercios del mapa…
+			{:else}
+				<strong class="text-gray-700 dark:text-gray-200">{visibles.length}</strong>
+				{visibles.length === 1 ? 'comercio' : 'comercios'} en esta zona del mapa
+				<span class="text-gray-400 dark:text-gray-500">
+					(de {puntos.length} con ubicación para estos filtros). Acercate o mové el mapa y la lista se
+					actualiza.
+				</span>
+			{/if}
 		</p>
-		{#if empresas.length > 0}
+		{#if fichasMapa.length > 0}
 			<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each empresas as empresa (empresa.id)}
+				{#each fichasMapa as empresa (empresa.id)}
 					<EmpresaCard {empresa} />
 				{/each}
 			</div>
+			{#if fichasMapa.length < visibles.length}
+				<div class="mt-8 flex justify-center">
+					<Button
+						variant="outline"
+						onclick={() => cargarFichasVisibles(false)}
+						disabled={cargandoFichas}
+					>
+						{cargandoFichas
+							? 'Cargando...'
+							: `Ver más (${visibles.length - fichasMapa.length} en esta zona)`}
+					</Button>
+				</div>
+			{/if}
+		{:else if !cargandoPuntos && visibles.length === 0 && puntos.length > 0}
+			<p class="mt-4 text-sm text-gray-400 dark:text-gray-500">
+				No hay comercios en esta zona. Alejá el mapa para ver más.
+			</p>
 		{/if}
 	{:else if empresas.length === 0 && cargando}
 		<p class="text-sm text-gray-400 dark:text-gray-500" role="status">Cargando comercios...</p>

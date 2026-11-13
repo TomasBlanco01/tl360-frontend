@@ -28,9 +28,10 @@ describe('evaluarAcceso', () => {
 		expect(evaluarAcceso('superadmin')).toBe('/');
 	});
 
-	it('superadmin entra a todo', () => {
+	it('superadmin gestiona desde su panel: Mi Negocio lo lleva a /admin', () => {
 		auth.login('t', superadmin);
-		expect(evaluarAcceso('admin')).toBeNull();
+		expect(evaluarAcceso('admin')).toBe('/admin');
 		expect(evaluarAcceso('superadmin')).toBeNull();
+		expect(evaluarAcceso('auth')).toBeNull();
 	});
 });

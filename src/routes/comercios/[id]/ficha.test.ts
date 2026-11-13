@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { page } from '$app/state';
 import { goto } from '$app/navigation';
@@ -74,6 +74,24 @@ describe('ficha del comercio', () => {
 		expect(screen.getByRole('link', { name: /Volver/ })).toHaveAttribute('href', '/comercios');
 	});
 
+	it('si se entra por slug, las reseñas se piden con el ID numérico', async () => {
+		(page as { params: Record<string, string> }).params = { id: 'estilo-urbano' };
+		get.mockImplementation(async (url: string) => {
+			if (url === '/empresas/estilo-urbano')
+				return empresa({
+					id: 7,
+					nombre: 'Estilo Urbano',
+					slug: 'estilo-urbano',
+					turnos_habilitados: true
+				});
+			if (url === '/empresas/horarios/7') return HORARIOS;
+			return [];
+		});
+		await cargarFicha();
+		await waitFor(() => expect(get).toHaveBeenCalledWith('/empresas/7/calificaciones'));
+		expect(get).not.toHaveBeenCalledWith('/empresas/NaN/calificaciones');
+	});
+
 	it('si el comercio no existe lo informa', async () => {
 		get.mockRejectedValue(new Error('404'));
 		render(Ficha);
@@ -86,7 +104,7 @@ describe('ficha del comercio', () => {
 
 	it('muestra los datos del comercio', async () => {
 		backend({
-			categoria: 'Peluquerías',
+			rubro: 'Peluquerías',
 			slogan: 'Cortes modernos',
 			descripcion: 'Color, alisados y peinados para novias.'
 		});
@@ -138,7 +156,12 @@ describe('ficha del comercio', () => {
 	});
 
 	it('las redes sociales abren en otra pestaña sin filtrar el origen', async () => {
-		backend({ instagram: 'https://instagram.com/estilo', facebook: 'https://facebook.com/estilo' });
+		backend({
+			redes_sociales: [
+				{ tipo: 'instagram', url: 'https://instagram.com/estilo' },
+				{ tipo: 'facebook', url: 'https://facebook.com/estilo' }
+			]
+		});
 		await cargarFicha();
 		const ig = screen.getByRole('link', { name: /Instagram/ });
 		expect(ig).toHaveAttribute('href', 'https://instagram.com/estilo');
@@ -191,12 +214,47 @@ describe('ficha del comercio', () => {
 			expect(screen.getAllByRole('button', { name: 'Llamar' }).length).toBeGreaterThan(0);
 			expect(screen.getAllByRole('button', { name: 'WhatsApp' }).length).toBeGreaterThan(0);
 		});
+
+		it('reservar es de clientes: el dueño va a Mi Negocio y el resto ve el aviso', async () => {
+			auth.login('t', { id: 5, nombre: 'Martina', email: 'm@b.com', rol: 'cliente' });
+			let vista = render(Ficha);
+			await screen.findByRole('heading', { name: 'Estilo Urbano' });
+			expect(screen.getByRole('button', { name: 'Reservar turno' })).toBeInTheDocument();
+			vista.unmount();
+
+			backend({ usuario_id: 9 });
+			auth.login('t', { id: 9, nombre: 'Sofía', email: 's@b.com', rol: 'admin' });
+			vista = render(Ficha);
+			await screen.findByRole('heading', { name: 'Estilo Urbano' });
+			expect(screen.queryByRole('button', { name: 'Reservar turno' })).toBeNull();
+			expect(screen.getByRole('link', { name: 'Ver mis turnos en Mi Negocio' })).toHaveAttribute(
+				'href',
+				'/negocio'
+			);
+			expect(screen.queryByRole('button', { name: 'Reportar' })).toBeNull();
+			vista.unmount();
+
+			for (const rol of ['admin', 'superadmin'] as const) {
+				auth.login('t', { id: 50, nombre: 'Otro', email: 'o@b.com', rol });
+				vista = render(Ficha);
+				await screen.findByRole('heading', { name: 'Estilo Urbano' });
+				expect(screen.queryByRole('button', { name: 'Reservar turno' })).toBeNull();
+				expect(
+					screen.getByText('Las reservas online se hacen con una cuenta de cliente.')
+				).toBeInTheDocument();
+				// El superadmin atiende los reportes: no se los manda a sí mismo.
+				expect(screen.queryByRole('button', { name: 'Reportar' }) === null).toBe(
+					rol === 'superadmin'
+				);
+				vista.unmount();
+			}
+		});
 	});
 
 	describe('contacto', () => {
-		it('muestra todos los teléfonos con su etiqueta', async () => {
+		it('muestra todos los teléfonos con su descripción', async () => {
 			backend({
-				telefonos: [{ numero: '2392111111', etiqueta: 'Turnos' }, { numero: '2392222222' }]
+				telefonos: [{ numero: '2392111111', descripcion: 'Turnos' }, { numero: '2392222222' }]
 			});
 			await cargarFicha();
 			expect(screen.getByText('Turnos — 2392-111111')).toBeInTheDocument();

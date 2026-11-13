@@ -16,32 +16,25 @@ vi.mock('$lib/api', async (original) => {
 
 const get = api.get as ReturnType<typeof vi.fn>;
 
-const rubro = (
-	id: number,
-	nombre: string,
-	super_rubro: string | null,
-	cantidad: number,
-	turnos = false
-) => ({
+const rubro = (id: number, nombre: string, cantidad: number, turnos = false) => ({
 	id,
 	nombre,
-	super_rubro,
 	cantidad,
 	turnos_habilitados: turnos
 });
 
 const rubros = [
-	rubro(1, 'Peluquerías', 'Salud, belleza y bienestar', 56, true),
-	rubro(2, 'Psicólogos', 'Salud, belleza y bienestar', 91, true),
-	rubro(3, 'Carnicerías', 'Gastronomía', 35),
-	rubro(4, 'Pizzerías', 'Gastronomía', 65),
-	rubro(5, 'Vacío', 'Gastronomía', 0)
+	rubro(1, 'Peluquerías', 56, true),
+	rubro(2, 'Psicólogos', 91, true),
+	rubro(3, 'Carnicerías', 35),
+	rubro(4, 'Pizzerías', 65),
+	rubro(5, 'Vacío', 0)
 ];
 
 function backend(extra: Record<string, unknown> = {}) {
 	get.mockImplementation(async (url: string) => {
 		if (url in extra) return extra[url];
-		if (url === '/categorias') return rubros;
+		if (url === '/rubros') return rubros;
 		if (url.startsWith('/empresas'))
 			return [empresa({ id: 1, nombre: 'Destacado 1' }), empresa({ id: 2, nombre: 'Destacado 2' })];
 		return [];
@@ -54,38 +47,50 @@ beforeEach(() => {
 });
 
 describe('portada', () => {
-	it('agrupa los rubros por súper rubro, ordenados por cantidad de comercios', async () => {
+	it('agrupa los rubros según si toman turnos y explica qué es cada grupo', async () => {
 		render(Home);
-		const salud = (await screen.findByText(/Salud, belleza y bienestar/)).closest('div')!;
-		expect(salud).toHaveTextContent('147 comercios');
-		const gastro = screen.getByText(/^Gastronomía/).closest('div')!;
-		expect(gastro).toHaveTextContent('100 comercios');
-		// el grupo con más comercios va primero
-		const titulos = screen
-			.getAllByText(/comercios$/)
-			.map((e) => e.parentElement?.textContent ?? '');
-		expect(titulos[0]).toContain('Salud');
+		const conTurnos = (await screen.findByText('Con reserva de turnos online')).closest('div')!;
+		expect(conTurnos).toHaveTextContent('podés sacar turno');
+		expect(within(conTurnos).getByRole('button', { name: /Peluquerías/ })).toBeInTheDocument();
+		const directorio = screen.getByText('Solo directorio').closest('div')!;
+		expect(within(directorio).getByRole('button', { name: /Carnicerías/ })).toBeInTheDocument();
+		// Ya no hay un "· N comercios" suelto en el título: cada rubro muestra su cantidad.
+		expect(screen.queryByText(/· \d+ comercios/)).not.toBeInTheDocument();
+		expect(screen.getByTitle('91 comercios')).toBeInTheDocument();
 	});
 
-	it('dentro de cada grupo ordena los rubros de más a menos comercios', async () => {
+	it('dentro de cada grupo ordena los rubros alfabéticamente', async () => {
 		render(Home);
-		const salud = (await screen.findByText(/Salud, belleza y bienestar/)).closest('div')!;
-		const botones = within(salud)
+		const conTurnos = (await screen.findByText('Con reserva de turnos online')).closest('div')!;
+		const botones = within(conTurnos)
 			.getAllByRole('button')
 			.map((b) => b.textContent!.replace(/\s+/g, ' ').trim());
-		expect(botones[0]).toContain('Psicólogos');
-		expect(botones[1]).toContain('Peluquerías');
+		expect(botones[0]).toContain('Peluquerías');
+		expect(botones[1]).toContain('Psicólogos');
+	});
+
+	it('el buscador interno filtra los rubros mientras se escribe', async () => {
+		render(Home);
+		await screen.findByText('Solo directorio');
+		const buscador = screen.getByRole('searchbox', { name: 'Buscar un rubro' });
+		await userEvent.type(buscador, 'pizz');
+		expect(screen.getByRole('button', { name: /Pizzerías/ })).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: /Peluquerías/ })).not.toBeInTheDocument();
+		expect(screen.queryByText('Con reserva de turnos online')).not.toBeInTheDocument();
+		await userEvent.clear(buscador);
+		await userEvent.type(buscador, 'zzz');
+		expect(screen.getByText(/No encontramos rubros/)).toBeInTheDocument();
 	});
 
 	it('no muestra los rubros sin comercios', async () => {
 		render(Home);
-		await screen.findByText(/Gastronomía/);
+		await screen.findByText('Solo directorio');
 		expect(screen.queryByText('Vacío')).not.toBeInTheDocument();
 	});
 
 	it('marca los rubros que toman turnos online', async () => {
 		render(Home);
-		await screen.findByText(/Gastronomía/);
+		await screen.findByText('Solo directorio');
 		expect(
 			screen
 				.getByRole('button', { name: /Peluquerías/ })
@@ -106,7 +111,7 @@ describe('portada', () => {
 
 	it('buscar lleva al listado con el texto (codificado)', async () => {
 		render(Home);
-		await userEvent.type(screen.getByPlaceholderText(/Buscar/), 'café & té');
+		await userEvent.type(screen.getByPlaceholderText(/Buscar por nombre/), 'café & té');
 		await userEvent.click(screen.getByRole('button', { name: 'Buscar' }));
 		expect(goto).toHaveBeenCalledWith('/comercios?q=caf%C3%A9%20%26%20t%C3%A9');
 	});
@@ -118,28 +123,30 @@ describe('portada', () => {
 	});
 
 	it('con muchos rubros en un grupo, ofrece verlos todos', async () => {
-		const muchos = Array.from({ length: 20 }, (_, i) =>
-			rubro(100 + i, `Rubro ${i}`, 'Servicios', 20 - i)
-		);
-		backend({ '/categorias': muchos });
+		const muchos = Array.from({ length: 20 }, (_, i) => rubro(100 + i, `Rubro ${i}`, 20 - i, true));
+		backend({ '/rubros': muchos });
 		render(Home);
-		await screen.findByText(/^Servicios/);
-		expect(screen.queryByRole('button', { name: /Rubro 19/ })).not.toBeInTheDocument();
+		await screen.findByText('Con reserva de turnos online');
+		// En orden alfabético, "Rubro 9" es el último.
+		expect(screen.queryByRole('button', { name: /Rubro 9/ })).not.toBeInTheDocument();
 		await userEvent.click(screen.getByRole('button', { name: 'Ver los 20 rubros' }));
-		expect(screen.getByRole('button', { name: /Rubro 19/ })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /Rubro 9/ })).toBeInTheDocument();
 		await userEvent.click(screen.getByRole('button', { name: 'Ver menos' }));
-		expect(screen.queryByRole('button', { name: /Rubro 19/ })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: /Rubro 9/ })).not.toBeInTheDocument();
 	});
 
-	it('sin agrupación (modo mock) muestra todo en un solo grupo', async () => {
+	it('sin el dato de turnos (modo mock) muestra todo en un solo grupo', async () => {
 		backend({
-			'/categorias': [
+			'/rubros': [
 				{ id: 1, nombre: 'Peluquería' },
 				{ id: 2, nombre: 'Gimnasio' }
 			]
 		});
 		render(Home);
-		expect(await screen.findByText('Rubros', { selector: 'p' })).toBeInTheDocument();
+		expect(
+			await screen.findByText('Con reserva de turnos online', { selector: 'p' })
+		).toBeInTheDocument();
+		expect(screen.queryByText('Solo directorio')).not.toBeInTheDocument();
 		expect(screen.getByRole('button', { name: /Peluquería/ })).toBeInTheDocument();
 	});
 
