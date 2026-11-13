@@ -31,7 +31,11 @@
 			if (res.user.email_verificado === false) {
 				goto(`/auth/verificar?email=${encodeURIComponent(res.user.email)}`);
 			} else {
-				goto('/');
+				// Cada rol entra a su pantalla de trabajo: el dueño a sus turnos, el superadmin a la
+				// bandeja de verificación (RF-15) y el cliente a la portada.
+				goto(
+					res.user.rol === 'admin' ? '/negocio' : res.user.rol === 'superadmin' ? '/admin' : '/'
+				);
 			}
 		} catch (err) {
 			console.error(err);

@@ -3,12 +3,12 @@
 	import { goto } from '$app/navigation';
 	import { fly } from 'svelte/transition';
 	import { api, ApiError } from '$lib/api';
-	import { validateForm, required, minLength } from '$lib/validation';
+	import { validateForm, required, passwordSegura } from '$lib/validation';
 	import FormField from '$lib/components/FormField.svelte';
+	import RequisitosPassword from '$lib/components/RequisitosPassword.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
-	// NOTA: requiere que el backend exponga POST /auth/reset-password (no existe todavía). El link
-	// del mail de recuperación traería el token como ?token=...
+	// El enlace del correo de recuperación trae el token como ?token=...
 	const token = $derived(page.url.searchParams.get('token') ?? '');
 
 	let values = $state({ contraseña: '', confirmar: '' });
@@ -19,7 +19,7 @@
 	async function handleSubmit() {
 		apiError = '';
 		errors = validateForm(values, {
-			contraseña: [required(), minLength(6)],
+			contraseña: [required(), passwordSegura()],
 			confirmar: [required()]
 		});
 		if (values.contraseña !== values.confirmar) {
@@ -68,13 +68,16 @@
 				}}
 				class="flex flex-col gap-4"
 			>
-				<FormField
-					label="Nueva contraseña"
-					type="password"
-					required
-					bind:value={values.contraseña}
-					error={errors.contraseña}
-				/>
+				<div>
+					<FormField
+						label="Nueva contraseña"
+						type="password"
+						required
+						bind:value={values.contraseña}
+						error={errors.contraseña}
+					/>
+					<RequisitosPassword password={values.contraseña} />
+				</div>
 				<FormField
 					label="Confirmar contraseña"
 					type="password"

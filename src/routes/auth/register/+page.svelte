@@ -4,6 +4,7 @@
 	import { api, ApiError } from '$lib/api';
 	import { validateForm, required, email as emailRule, passwordSegura } from '$lib/validation';
 	import FormField from '$lib/components/FormField.svelte';
+	import RequisitosPassword from '$lib/components/RequisitosPassword.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
 	let values = $state({
@@ -32,25 +33,21 @@
 
 		loading = true;
 		try {
-			try {
-				const chequeo = await api.get<{ existe: boolean }>(
-					`/auth/existe?email=${encodeURIComponent(values.email)}`
-				);
-				if (chequeo && (chequeo as { existe: boolean }).existe) {
-					apiError = 'Este correo ya existe';
-					return;
-				}
-			} catch {
-				// Si el backend no expone /auth/existe, el POST devuelve el 409.
-			}
-			await api.post('/auth/register', {
+			// Un correo ya registrado lo informa el propio POST (409): no hay un endpoint público para
+			// preguntar si un correo existe, porque permitiría averiguar quién tiene cuenta.
+			const res = await api.post<{ token_verificacion?: string }>('/auth/register', {
 				nombre: values.nombre,
 				email: values.email,
 				contraseña: values.contraseña,
 				rol: values.rol
 			});
-			// RF-01: la cuenta nace sin verificar; el siguiente paso es confirmar el correo.
-			goto(`/auth/verificar?email=${encodeURIComponent(values.email)}`);
+			// RF-01: la cuenta nace sin verificar; el siguiente paso es confirmar el correo. En
+			// desarrollo sin servidor de correo el backend devuelve el enlace y se sigue directo.
+			goto(
+				res?.token_verificacion
+					? `/auth/verificar?token=${encodeURIComponent(res.token_verificacion)}`
+					: `/auth/verificar?email=${encodeURIComponent(values.email)}`
+			);
 		} catch (err) {
 			console.error(err);
 			apiError =
@@ -93,13 +90,16 @@
 				bind:value={values.email}
 				error={errors.email}
 			/>
-			<FormField
-				label="Contraseña"
-				type="password"
-				required
-				bind:value={values.contraseña}
-				error={errors.contraseña}
-			/>
+			<div>
+				<FormField
+					label="Contraseña"
+					type="password"
+					required
+					bind:value={values.contraseña}
+					error={errors.contraseña}
+				/>
+				<RequisitosPassword password={values.contraseña} />
+			</div>
 			<FormField
 				label="Confirmar clave"
 				type="password"

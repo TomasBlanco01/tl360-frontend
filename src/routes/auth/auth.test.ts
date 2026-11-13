@@ -64,6 +64,19 @@ describe('página de login', () => {
 		expect(auth.user).toEqual(user);
 	});
 
+	it.each([
+		['admin', '/negocio'],
+		['superadmin', '/admin']
+	])('el rol %s entra directo a su panel (%s)', async (rol, destino) => {
+		const user = { id: 4, nombre: 'Dueño', email: 'd@test.com', rol, email_verificado: true };
+		post.mockResolvedValue({ message: 'ok', token: 'tok-abc', user });
+		render(Login);
+		await escribir(/Correo/, 'd@test.com');
+		await escribir(/Contraseña/, 'clave123');
+		await userEvent.click(screen.getByRole('button', { name: 'Iniciar Sesión' }));
+		await waitFor(() => expect(goto).toHaveBeenCalledWith(destino));
+	});
+
 	it('si la cuenta no está verificada va a verificar el correo (RF-01)', async () => {
 		const user = {
 			id: 3,
@@ -214,28 +227,17 @@ describe('página de registro', () => {
 		});
 	});
 
-	it('valida email duplicado contra /auth/existe', async () => {
-		get.mockResolvedValueOnce({ existe: true });
+	it('muestra el error del backend (correo ya registrado) sin consultar antes si existe', async () => {
+		post.mockRejectedValue(new ApiError(409, 'Ese correo ya está registrado'));
 		render(Register);
 		await escribir(/Nombre/, 'Ana');
 		await escribir(/Correo/, 'ana@test.com');
 		await escribir(/^Contraseña/, 'Clave123');
 		await escribir(/Confirmar clave/, 'Clave123');
 		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
-		expect(await screen.findByText(/ya existe/)).toBeInTheDocument();
-		expect(post).not.toHaveBeenCalled();
-		expect(goto).not.toHaveBeenCalled();
-	});
-
-	it('muestra el error del backend (correo ya registrado)', async () => {
-		post.mockRejectedValue(new ApiError(409, 'Este correo ya existe'));
-		render(Register);
-		await escribir(/Nombre/, 'Ana');
-		await escribir(/Correo/, 'ana@test.com');
-		await escribir(/^Contraseña/, 'Clave123');
-		await escribir(/Confirmar clave/, 'Clave123');
-		await userEvent.click(screen.getByRole('button', { name: /Registr|Crear/ }));
-		expect(await screen.findByText(/ya existe/)).toBeInTheDocument();
+		expect(await screen.findByText('Ese correo ya está registrado')).toBeInTheDocument();
+		// No hay endpoint para averiguar si un correo tiene cuenta (evita enumerar usuarios).
+		expect(get).not.toHaveBeenCalled();
 		expect(goto).not.toHaveBeenCalled();
 	});
 });
