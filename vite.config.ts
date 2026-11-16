@@ -13,7 +13,8 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			adapter: adapter()
+			// Runtime fijo: adapter-vercel 6 rechaza versiones de Node que no conoce (Vercel ya usa una más nueva).
+			adapter: adapter({ runtime: 'nodejs24.x' })
 		}),
 		svelteTesting()
 	],

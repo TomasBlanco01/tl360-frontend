@@ -635,7 +635,9 @@ describe('mock: turnos agendados por el comercio (RF-04)', () => {
 
 	it('solo agenda en los horarios de la grilla del comercio', async () => {
 		const { llamar } = await nuevo();
-		const fecha = diaHabil(5);
+		// Lunes a viernes: el sábado el comercio no atiende a la tarde y el test dependería del día en que corre.
+		let fecha = diaHabil(5);
+		while ([0, 6].includes(new Date(fecha + 'T12:00:00').getDay())) fecha = sumarDias(fecha, 1);
 		let domingo = fecha;
 		while (new Date(domingo + 'T12:00:00').getDay() !== 0) domingo = sumarDias(domingo, 1);
 		const agendar = (f: string, hora: string) =>
